@@ -8,19 +8,7 @@
 
 ## 1. Pipeline Overview
 
-```mermaid
-flowchart TD
-    A[Topic / Query Input] --> B[URL Discovery]
-    B --> C[Scraping Layer]
-    C --> D[Content Extraction and Cleaning]
-    D --> E[Storage Layer]
-    E --> F[Auto-Labelling Layer]
-    F --> G{Human Review Needed?}
-    G -->|Yes| H[Human-in-the-Loop QA]
-    G -->|No| I[Dataset Export]
-    H --> I
-    I --> J[ML-Ready Dataset: JSONL / HF Datasets / CSV]
-```
+![Pipeline](https://github.com/sohmh/Loomset-Text-Based-Data-Extraction-Pipeline-for-ML-Ready-Datasets/blob/main/Diagrams/Workflow.png)
 
 The pipeline is organized as seven stages. Each stage is a swappable, independent module so components can be upgraded later without redesigning the whole system.
 
