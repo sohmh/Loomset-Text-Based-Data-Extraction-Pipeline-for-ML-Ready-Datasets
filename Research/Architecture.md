@@ -8,7 +8,9 @@
 
 ## 1. Pipeline Overview
 
-![Pipeline](https://github.com/sohmh/Loomset-Text-Based-Data-Extraction-Pipeline-for-ML-Ready-Datasets/blob/main/Diagrams/Workflow.png)
+<p align="center">
+  <img src="https://github.com/sohmh/Loomset-Text-Based-Data-Extraction-Pipeline-for-ML-Ready-Datasets/blob/main/Diagrams/Pipeline_Overview.png" alt="Demo Screenshot" width="1000">
+</p>
 
 The pipeline is organized as seven stages. Each stage is a swappable, independent module so components can be upgraded later without redesigning the whole system.
 
