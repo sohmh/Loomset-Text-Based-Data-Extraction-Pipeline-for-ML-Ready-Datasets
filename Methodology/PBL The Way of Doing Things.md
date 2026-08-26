@@ -15,4 +15,3 @@ What sort of resources am I going to need to study & implement things : I must f
 - How to implement an automated data cleaner ?
 - How to implement an automated data-labeller ?
 - How to connect all the pipelines together ? 
-- 
