@@ -1,0 +1,32 @@
+project:
+  name: loomset
+  data_dir: data
+  db_path: data/loomset.db
+  export_dir: data/exports
+
+logging:
+  level: INFO
+
+query:
+  max_results: 10
+
+scraping:
+  min_html_chars: 500
+  dynamic_fallback: true
+
+search:
+  max_results: 10
+
+cleaning:
+  dedup_threshold: 0.9
+  min_text_length: 200
+  languages: ["en"]
+
+labeling:
+  default_label: relevant
+  allowed_labels: ["relevant", "irrelevant"]
+  ollama_model: "qwen3:8b"
+  ollama_url: "http://localhost:11434"
+
+export:
+  push_to_hub: false

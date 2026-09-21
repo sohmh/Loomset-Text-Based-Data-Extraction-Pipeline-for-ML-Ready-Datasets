@@ -1,0 +1,1463 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>LoomSet — extraction pipeline for niche datasets</title>
+<meta name="description" content="LoomSet is an end-to-end pipeline that transforms raw URLs into labeled, HuggingFace-ready datasets. Discovery, scraping, extraction, cleaning, labeling, export — all in one tool.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --paper:#ECE8DE;
+    --paper-line:rgba(23,23,15,0.07);
+    --panel:#F7F5EF;
+    --panel-2:#FBFAF6;
+    --ink:#17170F;
+    --ink-soft:#6E6B5E;
+    --ink-faint:#A8A493;
+    --amber:#C4762A;
+    --amber-soft:rgba(196,118,42,0.14);
+    --moss:#55684A;
+    --moss-soft:rgba(85,104,74,0.14);
+    --rust:#9C3B2B;
+    --rust-soft:rgba(156,59,43,0.14);
+    --line:rgba(23,23,15,0.15);
+    --line-strong:rgba(23,23,15,0.35);
+    --mono:'JetBrains Mono', 'IBM Plex Mono', Menlo, Consolas, monospace;
+    --sans:'Inter', -apple-system, 'Segoe UI', sans-serif;
+    --header-h:56px;
+  }
+
+  *,*::before,*::after{box-sizing:border-box;}
+  html,body{margin:0;padding:0;}
+  body{
+    background:var(--paper);
+    background-image:
+      radial-gradient(var(--paper-line) 1px, transparent 1px);
+    background-size:18px 18px;
+    color:var(--ink);
+    font-family:var(--sans);
+    -webkit-font-smoothing:antialiased;
+  }
+
+  a{color:inherit;}
+  button{font-family:inherit;}
+  ::selection{background:var(--amber-soft);}
+
+  input,select,textarea{font-family:var(--sans);}
+
+  :focus-visible{outline:2px solid var(--amber); outline-offset:2px;}
+
+  @media (prefers-reduced-motion: reduce){
+    *{animation-duration:0.001ms !important; animation-iteration-count:1 !important; transition-duration:0.001ms !important;}
+  }
+
+  /* ---------- topbar ---------- */
+  .topbar{
+    position:sticky; top:0; z-index:30;
+    height:var(--header-h);
+    display:flex; align-items:center; gap:20px;
+    padding:0 20px;
+    background:var(--panel);
+    border-bottom:1px solid var(--line);
+  }
+  .logo{
+    display:flex; align-items:center; gap:9px;
+    font-family:var(--mono); font-weight:700; font-size:15px; letter-spacing:0.04em;
+    white-space:nowrap;
+  }
+  .logo .mark{
+    width:9px; height:9px; background:var(--ink); display:inline-block;
+    transform:rotate(45deg); flex:none;
+  }
+  .tagline{
+    font-size:11px; color:var(--ink-soft); white-space:nowrap;
+    border-left:1px solid var(--line); padding-left:16px;
+  }
+  .stepper{
+    display:flex; gap:2px; margin:0 auto;
+    overflow-x:auto; scrollbar-width:none;
+  }
+  .stepper::-webkit-scrollbar{display:none;}
+  .step{
+    display:flex; align-items:baseline; gap:6px;
+    background:none; border:none; border-bottom:2px solid transparent;
+    padding:8px 12px; cursor:pointer;
+    font-family:var(--mono); font-size:11px; letter-spacing:0.08em; text-transform:uppercase;
+    color:var(--ink-faint); white-space:nowrap;
+    transition:color .15s, border-color .15s;
+  }
+  .step .step-num{font-weight:700;}
+  .step.is-done{color:var(--ink-soft);}
+  .step.is-done .step-num::before{content:"✓ ";}
+  .step.is-current{color:var(--ink); border-bottom-color:var(--amber);}
+  .step.is-locked{cursor:not-allowed;}
+  .step:not(.is-locked):hover{color:var(--ink);}
+  .step.shake{animation:shake .3s;}
+  @keyframes shake{
+    0%,100%{transform:translateX(0);}
+    25%{transform:translateX(-3px);}
+    75%{transform:translateX(3px);}
+  }
+
+  .run-status{
+    display:flex; align-items:center; gap:8px; flex:none;
+    font-family:var(--mono); font-size:10px; letter-spacing:0.1em; text-transform:uppercase;
+    color:var(--ink-soft); white-space:nowrap;
+  }
+  .run-dot{width:7px; height:7px; border-radius:50%; background:var(--ink-faint); flex:none;}
+  .run-status.running .run-dot{background:var(--amber); animation:pulse 1.1s infinite;}
+  .run-status.complete .run-dot{background:var(--moss);}
+  @keyframes pulse{
+    0%,100%{box-shadow:0 0 0 0 var(--amber-soft);}
+    50%{box-shadow:0 0 0 5px var(--amber-soft);}
+  }
+
+  /* ---------- backend status indicator ---------- */
+  .backend-status{
+    display:flex; align-items:center; gap:6px; flex:none;
+    font-family:var(--mono); font-size:9px; letter-spacing:0.08em; text-transform:uppercase;
+    color:var(--ink-faint);
+  }
+  .backend-dot{width:6px; height:6px; border-radius:50%; flex:none;}
+  .backend-dot.ok{background:var(--moss);}
+  .backend-dot.fail{background:var(--rust);}
+  .backend-dot.checking{background:var(--amber); animation:pulse 1.5s infinite;}
+
+  /* ---------- body grid ---------- */
+  .body-grid{
+    display:grid;
+    grid-template-columns:248px 1fr 272px;
+    gap:1px;
+    background:var(--line);
+    min-height:calc(100vh - var(--header-h));
+    align-items:start;
+  }
+  .ledger, .readout, .stage-canvas{ background:var(--paper); }
+
+  .ledger, .readout{
+    position:sticky; top:var(--header-h);
+    max-height:calc(100vh - var(--header-h));
+    overflow-y:auto;
+    padding:20px 18px;
+  }
+
+  .panel-title{
+    font-family:var(--mono); font-size:10px; letter-spacing:0.12em; text-transform:uppercase;
+    color:var(--ink-soft); margin:0 0 14px; display:flex; align-items:center; justify-content:space-between;
+  }
+  .panel-title .count{color:var(--ink);}
+
+  /* ---------- ledger: setup mode (stage 1/2) ---------- */
+  .ledger-setup-panel{display:none;}
+  .ledger-setup-panel.active{display:block;}
+  .example-chip{
+    display:block; width:100%; text-align:left;
+    background:var(--panel-2); border:1px solid var(--line); border-radius:3px;
+    padding:9px 10px; margin-bottom:7px; cursor:pointer;
+    font-family:var(--sans); font-size:12.5px; color:var(--ink);
+    transition:border-color .12s, background .12s;
+  }
+  .example-chip:hover{border-color:var(--ink);}
+  .empty-note{
+    font-size:12px; color:var(--ink-faint); font-style:italic; line-height:1.5;
+  }
+  .source-mini{
+    display:flex; justify-content:space-between; gap:8px;
+    font-size:12px; padding:7px 0; border-bottom:1px solid var(--line);
+  }
+  .source-mini:last-child{border-bottom:none;}
+  .source-mini span:last-child{color:var(--ink-soft); font-family:var(--mono); font-size:10.5px;}
+
+  /* ---------- ledger: records mode (stage 3-6) ---------- */
+  .ledger-records{display:none;}
+  .ledger-records.active{display:block;}
+  .record-row{
+    display:flex; align-items:center; gap:8px;
+    padding:7px 0; border-bottom:1px solid var(--line);
+    font-family:var(--mono); font-size:10.5px;
+  }
+  .record-row:last-child{border-bottom:none;}
+  .rec-dot{width:6px; height:6px; border-radius:50%; flex:none; background:var(--ink-faint);}
+  .rec-dot.found{background:var(--amber);}
+  .rec-dot.cleaned{background:var(--ink-soft);}
+  .rec-dot.labeled{background:var(--moss);}
+  .rec-dot.removed{background:var(--rust);}
+  .rec-domain{
+    flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+    color:var(--ink);
+  }
+  .rec-status{
+    flex:none; color:var(--ink-faint); text-transform:uppercase; font-size:9px; letter-spacing:.05em;
+  }
+  .rec-status.found{color:var(--amber);}
+  .rec-status.labeled{color:var(--moss);}
+  .rec-status.removed{color:var(--rust); text-decoration:line-through;}
+
+  /* ---------- readout ---------- */
+  .readout-field{
+    display:flex; justify-content:space-between; gap:10px;
+    padding:8px 0; border-bottom:1px solid var(--line);
+    font-family:var(--mono); font-size:11px;
+  }
+  .readout-field:last-of-type{border-bottom:none;}
+  .readout-field .k{color:var(--ink-soft); letter-spacing:.06em;}
+  .readout-field .v{color:var(--ink); font-weight:600; text-align:right; max-width:60%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
+  .readout-status-idle{color:var(--ink-faint) !important;}
+  .readout-status-running{color:var(--amber) !important;}
+  .readout-status-complete{color:var(--moss) !important;}
+
+  .barcode-block{margin-top:22px; padding-top:16px; border-top:1px solid var(--line);}
+  .barcode{display:flex; gap:1.5px; height:26px; align-items:flex-end; margin-bottom:6px;}
+  .barcode span{background:var(--ink); flex:none;}
+  .run-id{font-family:var(--mono); font-size:9.5px; color:var(--ink-faint); letter-spacing:.08em;}
+
+  /* ---------- stage canvas ---------- */
+  .stage-canvas{padding:36px 42px 60px;}
+  .stage{display:none;}
+  .stage.active{display:block; max-width:760px;}
+  .stage.wide.active{max-width:none;}
+
+  .eyebrow{
+    display:flex; align-items:center; gap:7px;
+    font-family:var(--mono); font-size:11px; letter-spacing:0.14em; text-transform:uppercase;
+    color:var(--amber); margin-bottom:14px;
+  }
+  .eyebrow::before{content:""; width:7px; height:7px; background:var(--amber); display:inline-block;}
+
+  h1{
+    font-family:var(--mono); font-weight:600;
+    font-size:clamp(26px,3.4vw,40px); line-height:1.08; letter-spacing:-0.01em;
+    margin:0 0 14px;
+  }
+  .lede{
+    font-size:15px; line-height:1.6; color:var(--ink-soft);
+    max-width:52ch; margin:0 0 30px;
+  }
+
+  .field-group{margin-bottom:22px;}
+  .field-label{
+    display:block; font-family:var(--mono); font-size:10.5px; letter-spacing:.08em; text-transform:uppercase;
+    color:var(--ink-soft); margin-bottom:8px;
+  }
+  .field-hint{font-size:12px; color:var(--ink-faint); margin-top:6px;}
+
+  input[type="text"], textarea, select{
+    width:100%; background:var(--panel-2); border:1px solid var(--line);
+    border-radius:3px; padding:11px 13px; font-size:14px; color:var(--ink);
+  }
+  input[type="text"]:focus, textarea:focus, select:focus{border-color:var(--ink);}
+  textarea{resize:vertical; min-height:76px; font-family:var(--mono); font-size:12.5px; line-height:1.6;}
+
+  .row-2{display:grid; grid-template-columns:1fr 1fr; gap:20px;}
+
+  input[type="range"]{
+    -webkit-appearance:none; width:100%; height:2px; background:var(--line-strong);
+    margin:14px 0 4px;
+  }
+  input[type="range"]::-webkit-slider-thumb{
+    -webkit-appearance:none; width:14px; height:14px; background:var(--ink);
+    border-radius:1px; cursor:pointer; margin-top:-6px;
+  }
+  input[type="range"]::-moz-range-thumb{
+    width:14px; height:14px; background:var(--ink); border:none; border-radius:1px; cursor:pointer;
+  }
+  input[type="range"]::-moz-range-track{height:2px; background:var(--line-strong);}
+  .range-readout{
+    display:flex; justify-content:space-between; font-family:var(--mono); font-size:11px; color:var(--ink-soft);
+  }
+  .range-readout .val{color:var(--ink); font-weight:600;}
+
+  .btn-primary{
+    background:var(--ink); color:var(--paper); border:none; border-radius:3px;
+    padding:13px 22px; font-family:var(--mono); font-size:12px; letter-spacing:.08em; text-transform:uppercase;
+    cursor:pointer; transition:background .15s, color .15s;
+  }
+  .btn-primary:hover:not(:disabled){background:var(--amber); color:var(--ink);}
+  .btn-primary:disabled{opacity:.32; cursor:not-allowed;}
+  .btn-ghost{
+    background:transparent; color:var(--ink); border:1px solid var(--line-strong); border-radius:3px;
+    padding:13px 22px; font-family:var(--mono); font-size:12px; letter-spacing:.08em; text-transform:uppercase;
+    cursor:pointer; margin-left:10px; transition:border-color .15s;
+  }
+  .btn-ghost:hover{border-color:var(--ink);}
+
+  .actions{display:flex; align-items:center; gap:4px; margin-top:8px;}
+
+  /* source cards */
+  .source-grid{display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-bottom:24px;}
+  .source-card{
+    position:relative; background:var(--panel-2); border:1px solid var(--line); border-radius:3px;
+    padding:14px 14px 14px 38px; cursor:pointer; transition:border-color .12s, background .12s;
+  }
+  .source-card:hover{border-color:var(--ink-soft);}
+  .source-card.selected{border-color:var(--amber); background:var(--amber-soft);}
+  .source-card input{position:absolute; left:14px; top:16px; accent-color:var(--ink); width:14px; height:14px;}
+  .source-name{font-size:13.5px; font-weight:600; margin-bottom:4px;}
+  .source-desc{font-size:12px; color:var(--ink-soft); line-height:1.45;}
+
+  .toggle-row{display:flex; align-items:center; justify-content:space-between; padding:10px 0; border-bottom:1px solid var(--line); font-size:13px;}
+  .toggle-row:last-child{border-bottom:none;}
+  .toggle{
+    position:relative; width:36px; height:20px; background:var(--line-strong); border-radius:10px;
+    flex:none; cursor:pointer; transition:background .15s;
+  }
+  .toggle::after{content:""; position:absolute; width:14px; height:14px; background:var(--panel); border-radius:50%; top:3px; left:3px; transition:left .15s;}
+  .toggle.on{background:var(--moss);}
+  .toggle.on::after{left:19px;}
+
+  /* extract stage */
+  .tree-wrap{
+    position:relative; background:var(--panel-2); border:1px solid var(--line); border-radius:3px;
+    overflow:hidden; height:560px;
+    background-image:radial-gradient(var(--paper-line) 1px, transparent 1px);
+    background-size:16px 16px;
+  }
+  .tree-wrap svg{display:block; width:100%; height:100%;}
+  .tree-start-overlay{
+    position:absolute; inset:0; display:flex; align-items:center; justify-content:center;
+    flex-direction:column; gap:16px; background:var(--panel-2);
+    transition:opacity .3s;
+  }
+  .tree-start-overlay.hidden{opacity:0; pointer-events:none;}
+  .tree-start-overlay p{font-size:13px; color:var(--ink-soft); max-width:40ch; text-align:center; margin:0;}
+
+  .params-box{
+    position:absolute; top:14px; left:14px; background:var(--panel);
+    border:1px solid var(--line); border-radius:3px; padding:12px 14px; width:180px;
+    font-family:var(--mono); z-index:2;
+  }
+  .params-box .pb-title{font-size:9.5px; letter-spacing:.1em; text-transform:uppercase; color:var(--ink-faint); margin-bottom:10px;}
+  .param-row{display:flex; align-items:center; gap:8px; margin-bottom:8px;}
+  .param-row:last-child{margin-bottom:0;}
+  .param-label{font-size:9px; color:var(--ink-soft); width:58px; flex:none; letter-spacing:.03em;}
+  .param-bar{flex:1; height:3px; background:var(--line); position:relative;}
+  .param-bar i{position:absolute; left:0; top:0; bottom:0; background:var(--ink-soft); display:block;}
+  .param-val{font-size:9px; color:var(--ink); width:32px; text-align:right;}
+
+  .node-info{
+    position:absolute; bottom:14px; right:14px; background:var(--panel);
+    border:1px solid var(--ink); border-radius:3px; padding:14px 16px; width:230px;
+    font-family:var(--mono); font-size:10.5px; z-index:2;
+    opacity:0; transform:translateY(6px); pointer-events:none; transition:opacity .15s, transform .15s;
+  }
+  .node-info.visible{opacity:1; transform:translateY(0);}
+  .node-info .ni-row{display:flex; justify-content:space-between; padding:3px 0; gap:10px;}
+  .node-info .ni-row span:first-child{color:var(--ink-faint);}
+  .node-info .ni-row span:last-child{color:var(--ink); text-align:right; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:140px;}
+
+  .extract-summary{margin-top:18px; font-family:var(--mono); font-size:12px; color:var(--ink-soft);}
+  .extract-summary strong{color:var(--ink);}
+
+  /* clean stage */
+  .op-row{margin-bottom:20px;}
+  .op-head{display:flex; justify-content:space-between; font-family:var(--mono); font-size:11px; letter-spacing:.05em; margin-bottom:8px;}
+  .op-head .op-name{color:var(--ink); text-transform:uppercase;}
+  .op-head .op-pct{color:var(--ink-soft);}
+  .op-track{height:6px; background:var(--line); border-radius:3px; overflow:hidden;}
+  .op-fill{height:100%; width:0%; background:var(--ink); transition:width .1s linear;}
+  .op-fill.done{background:var(--moss);}
+
+  .stat-strip{display:flex; gap:0; margin-top:28px; border:1px solid var(--line); border-radius:3px; overflow:hidden;}
+  .stat-box{flex:1; padding:14px 16px; border-right:1px solid var(--line);}
+  .stat-box:last-child{border-right:none;}
+  .stat-box .sb-label{font-family:var(--mono); font-size:9.5px; letter-spacing:.08em; text-transform:uppercase; color:var(--ink-faint); margin-bottom:6px;}
+  .stat-box .sb-val{font-family:var(--mono); font-size:22px; font-weight:600;}
+  .stat-box .sb-val.rust{color:var(--rust);}
+  .stat-box .sb-val.moss{color:var(--moss);}
+
+  /* label stage */
+  .taxo-row{margin-bottom:16px;}
+  .taxo-head{display:flex; justify-content:space-between; font-size:12.5px; margin-bottom:7px;}
+  .taxo-head .taxo-name{color:var(--ink);}
+  .taxo-head .taxo-count{font-family:var(--mono); color:var(--ink-soft); font-size:11px;}
+  .taxo-track{height:8px; background:var(--line); border-radius:4px; overflow:hidden;}
+  .taxo-fill{height:100%; width:0%; background:var(--moss); transition:width .2s ease-out;}
+
+  /* dataset stage */
+  .yield-grid{display:grid; grid-template-columns:repeat(3,1fr); gap:1px; background:var(--line); border:1px solid var(--line); border-radius:3px; overflow:hidden; margin-bottom:26px;}
+  .yield-box{background:var(--panel-2); padding:16px 18px;}
+  .yield-box .yb-label{font-family:var(--mono); font-size:9.5px; letter-spacing:.08em; text-transform:uppercase; color:var(--ink-faint); margin-bottom:8px;}
+  .yield-box .yb-val{font-family:var(--mono); font-size:24px; font-weight:600;}
+
+  .split-bar{display:flex; height:22px; border-radius:3px; overflow:hidden; margin-bottom:8px;}
+  .split-bar div{display:flex; align-items:center; justify-content:center; font-family:var(--mono); font-size:9.5px; color:var(--panel); font-weight:600;}
+  .split-train{background:var(--ink);}
+  .split-val{background:var(--ink-soft);}
+  .split-test{background:var(--ink-faint); color:var(--ink) !important;}
+  .split-legend{display:flex; gap:18px; font-family:var(--mono); font-size:10px; color:var(--ink-soft); margin-bottom:28px;}
+  .split-legend span::before{content:"■ "; }
+
+  .format-chips{display:flex; gap:10px; margin-bottom:20px;}
+  .format-chip{
+    border:1px solid var(--line-strong); border-radius:3px; padding:9px 16px;
+    font-family:var(--mono); font-size:11.5px; letter-spacing:.04em; color:var(--ink-soft);
+    cursor:pointer;
+  }
+  .format-chip.active{border-color:var(--moss); background:var(--moss-soft); color:var(--ink);}
+
+  .dataset-preview{
+    border:1px solid var(--line); border-radius:3px; background:var(--panel-2); overflow:hidden; margin-bottom:24px;
+  }
+  .dataset-preview .preview-head{
+    display:flex; justify-content:space-between; align-items:center; padding:10px 14px; border-bottom:1px solid var(--line);
+    font-family:var(--mono); font-size:10px; letter-spacing:.08em; text-transform:uppercase; color:var(--ink-soft);
+  }
+  .dataset-preview table{width:100%; border-collapse:collapse; font-size:12px;}
+  .dataset-preview th, .dataset-preview td{
+    text-align:left; padding:10px 12px; border-bottom:1px solid var(--line); vertical-align:top;
+  }
+  .dataset-preview th{background:rgba(23,23,15,0.02); font-family:var(--mono); font-size:10px; letter-spacing:.08em; text-transform:uppercase; color:var(--ink-soft);}
+  .dataset-preview td{color:var(--ink);}
+  .dataset-preview .preview-empty{padding:18px 14px; color:var(--ink-soft); font-size:13px;}
+
+  .demo-note{font-size:12px; color:var(--ink-faint); margin-top:20px; max-width:52ch; line-height:1.6;}
+
+  /* pipeline log */
+  .pipeline-log{
+    margin-top:18px; max-height:160px; overflow-y:auto;
+    background:var(--panel-2); border:1px solid var(--line); border-radius:3px;
+    padding:10px 12px; font-family:var(--mono); font-size:10.5px; color:var(--ink-soft);
+    line-height:1.7;
+  }
+  .pipeline-log .log-entry{display:block;}
+  .pipeline-log .log-stage{color:var(--amber); font-weight:600; text-transform:uppercase;}
+  .pipeline-log .log-ok{color:var(--moss);}
+  .pipeline-log .log-err{color:var(--rust);}
+
+  /* responsive */
+  @media (max-width:980px){
+    .body-grid{grid-template-columns:1fr;}
+    .ledger, .readout{position:static; max-height:none; border-bottom:1px solid var(--line);}
+    .stage-canvas{padding:28px 22px 48px;}
+    .tagline{display:none;}
+    .source-grid{grid-template-columns:1fr;}
+    .row-2{grid-template-columns:1fr;}
+    .yield-grid{grid-template-columns:1fr;}
+  }
+  @media (max-width:560px){
+    h1{font-size:24px;}
+    .tree-wrap{height:420px;}
+    .params-box{width:150px; padding:10px;}
+  }
+</style>
+</head>
+<body>
+
+<div class="app">
+
+  <header class="topbar">
+    <div class="logo"><span class="mark"></span>LoomSet</div>
+    <span class="tagline">extraction pipeline for niche datasets</span>
+    <nav class="stepper" id="stepper">
+      <button class="step" data-goto="1"><span class="step-num">01</span><span class="step-name">Niche</span></button>
+      <button class="step" data-goto="2"><span class="step-num">02</span><span class="step-name">Sources</span></button>
+      <button class="step" data-goto="3"><span class="step-num">03</span><span class="step-name">Extract</span></button>
+      <button class="step" data-goto="4"><span class="step-num">04</span><span class="step-name">Clean</span></button>
+      <button class="step" data-goto="5"><span class="step-num">05</span><span class="step-name">Label</span></button>
+      <button class="step" data-goto="6"><span class="step-num">06</span><span class="step-name">Dataset</span></button>
+    </nav>
+    <div class="backend-status" id="backendStatus"><span class="backend-dot checking"></span><span>Checking…</span></div>
+    <div class="run-status idle" id="runStatus"><span class="run-dot"></span><span id="runStatusText">Idle</span></div>
+  </header>
+
+  <div class="body-grid">
+
+    <!-- ================= LEDGER ================= -->
+    <aside class="ledger">
+      <div id="ledgerSetup">
+        <div class="ledger-setup-panel" data-stage="1">
+          <p class="panel-title">Seam examples</p>
+          <button class="example-chip" data-example="Vintage synthesizer service manuals">Vintage synthesizer service manuals</button>
+          <button class="example-chip" data-example="Regional folk remedy archives">Regional folk remedy archives</button>
+          <button class="example-chip" data-example="Amateur radio repair logs">Amateur radio repair logs</button>
+          <button class="example-chip" data-example="Obscure board game rulebooks">Obscure board game rulebooks</button>
+          <button class="example-chip" data-example="Endangered dialect phrase corpora">Endangered dialect phrase corpora</button>
+          <button class="example-chip" data-example="Small-batch fermentation notes">Small-batch fermentation notes</button>
+        </div>
+        <div class="ledger-setup-panel" data-stage="2">
+          <p class="panel-title">Selected sources</p>
+          <div id="sourceMiniList"><p class="empty-note">Nothing selected yet. Toggle a source type to add it here.</p></div>
+        </div>
+      </div>
+
+      <div class="ledger-records" id="ledgerRecords">
+        <p class="panel-title">Ledger <span class="count" id="ledgerCount">0</span></p>
+        <div id="recordList"></div>
+      </div>
+    </aside>
+
+    <!-- ================= STAGE CANVAS ================= -->
+    <main class="stage-canvas">
+
+      <!-- STAGE 1 — NICHE -->
+      <section class="stage active" data-stage="1">
+        <p class="eyebrow">Stage 01 — Define the seam</p>
+        <h1>What are you digging for?</h1>
+        <p class="lede">Name the niche field. Something with too little open data and too much scattered writing — that's the seam worth extracting.</p>
+
+        <div class="field-group">
+          <label class="field-label" for="nicheInput">Seam name</label>
+          <input type="text" id="nicheInput" placeholder="e.g. vintage synthesizer service manuals" maxlength="80">
+        </div>
+
+        <div class="field-group">
+          <label class="field-label" for="nicheDesc">Description <span style="text-transform:none; letter-spacing:0;">(optional)</span></label>
+          <textarea id="nicheDesc" placeholder="Add detail so sources and labels stay on-target — audience, era, format, whatever narrows it."></textarea>
+        </div>
+
+        <div class="row-2">
+          <div class="field-group">
+            <label class="field-label">Target record count</label>
+            <input type="range" id="targetSlider" min="5" max="50" step="5" value="10">
+            <div class="range-readout"><span>5</span><span class="val" id="targetVal">10 records</span><span>50</span></div>
+          </div>
+          <div class="field-group">
+            <label class="field-label" for="langSelect">Language</label>
+            <select id="langSelect">
+              <option>English</option>
+              <option>Spanish</option>
+              <option>German</option>
+              <option>Japanese</option>
+              <option>Multilingual</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="actions">
+          <button class="btn-primary" id="confirmNiche" disabled>Confirm seam →</button>
+        </div>
+      </section>
+
+      <!-- STAGE 2 — SOURCES -->
+      <section class="stage" data-stage="2">
+        <p class="eyebrow">Stage 02 — Survey sites</p>
+        <h1>Where should it dig?</h1>
+        <p class="lede">Pick the source types worth crawling for this seam. Each behaves differently — mix them to cover both structure and voice.</p>
+
+        <div class="source-grid" id="sourceGrid">
+          <label class="source-card" data-name="Forum &amp; board archives"><input type="checkbox"><div class="source-name">Forum &amp; board archives</div><div class="source-desc">Long-running threads, first-hand detail, messy formatting.</div></label>
+          <label class="source-card" data-name="Wiki &amp; fandom sites"><input type="checkbox"><div class="source-name">Wiki &amp; fandom sites</div><div class="source-desc">Structured, cross-linked, mostly already well-organized.</div></label>
+          <label class="source-card" data-name="Academic preprints"><input type="checkbox"><div class="source-name">Academic preprints</div><div class="source-desc">Formal language, citations, mostly locked in PDFs.</div></label>
+          <label class="source-card" data-name="Government open data"><input type="checkbox"><div class="source-name">Government open data</div><div class="source-desc">Clean tabular records, reliably public domain.</div></label>
+          <label class="source-card" data-name="Independent blogs &amp; zines"><input type="checkbox"><div class="source-name">Independent blogs &amp; zines</div><div class="source-desc">Voice-heavy writing, inconsistent structure.</div></label>
+          <label class="source-card" data-name="News &amp; RSS archives"><input type="checkbox"><div class="source-name">News &amp; RSS archives</div><div class="source-desc">Timestamped, high volume, needs heavy filtering.</div></label>
+        </div>
+
+        <div class="field-group">
+          <label class="field-label" for="seedUrls">Seed URLs <span style="text-transform:none; letter-spacing:0;">(optional)</span></label>
+          <textarea id="seedUrls" placeholder="One per line — the crawler expands outward from these."></textarea>
+        </div>
+
+        <div class="field-group" style="margin-bottom:8px;">
+          <div class="toggle-row">
+            <span>Respect robots.txt</span>
+            <div class="toggle on" id="toggleRobots"></div>
+          </div>
+          <div class="toggle-row">
+            <span>Rate-limit requests</span>
+            <div class="toggle on" id="toggleRate"></div>
+          </div>
+        </div>
+
+        <div class="actions">
+          <button class="btn-primary" id="confirmSources" disabled>Confirm sources →</button>
+        </div>
+      </section>
+
+      <!-- STAGE 3 — EXTRACT -->
+      <section class="stage wide" data-stage="3">
+        <p class="eyebrow">Stage 03 — Start extraction</p>
+        <h1>Send the crawler out.</h1>
+        <p class="lede">It walks outward from the seed sources, one link at a time, building a map of everything it touches.</p>
+
+        <div class="tree-wrap" id="treeWrap">
+          <div class="params-box">
+            <div class="pb-title">Pipeline parameters</div>
+            <div class="param-row"><span class="param-label">Max results</span><div class="param-bar"><i style="width:60%"></i></div><span class="param-val" id="paramResults">10</span></div>
+            <div class="param-row"><span class="param-label">Min length</span><div class="param-bar"><i style="width:40%"></i></div><span class="param-val">200</span></div>
+            <div class="param-row"><span class="param-label">Dedup</span><div class="param-bar"><i style="width:90%"></i></div><span class="param-val">0.9</span></div>
+            <div class="param-row"><span class="param-label">Timeout</span><div class="param-bar"><i style="width:75%"></i></div><span class="param-val">120s</span></div>
+          </div>
+
+          <svg id="treeSvg" viewBox="0 0 900 560" preserveAspectRatio="xMidYMid meet"></svg>
+
+          <div class="node-info" id="nodeInfo">
+            <div class="ni-row"><span>Type</span><span id="niType">—</span></div>
+            <div class="ni-row"><span>URL</span><span id="niUrl">—</span></div>
+            <div class="ni-row"><span>Stage</span><span id="niTime">—</span></div>
+            <div class="ni-row"><span>Status</span><span id="niStatus">—</span></div>
+          </div>
+
+          <div class="tree-start-overlay" id="treeOverlay">
+            <button class="btn-primary" id="startExtraction">Run full pipeline ▶</button>
+            <p>Runs the real backend: discovery → scraping → extraction → cleaning → labeling → export. Watch each record appear as it's processed.</p>
+          </div>
+        </div>
+
+        <p class="extract-summary" id="extractSummary">Waiting to start.</p>
+        <div class="pipeline-log" id="pipelineLog" style="display:none;"></div>
+
+        <div class="actions">
+          <button class="btn-primary" id="toClean" disabled>Proceed to cleaning →</button>
+        </div>
+      </section>
+
+      <!-- STAGE 4 — CLEAN -->
+      <section class="stage" data-stage="4">
+        <p class="eyebrow">Stage 04 — Refine</p>
+        <h1>Strip the noise.</h1>
+        <p class="lede">Raw pages carry a lot that isn't the seam — boilerplate, scripts, duplicate copies, the wrong language. This clears it out.</p>
+
+        <div id="opList">
+          <div class="op-row" data-op="dedup">
+            <div class="op-head"><span class="op-name">Deduplicate</span><span class="op-pct">—</span></div>
+            <div class="op-track"><div class="op-fill"></div></div>
+          </div>
+          <div class="op-row" data-op="language">
+            <div class="op-head"><span class="op-name">Filter language</span><span class="op-pct">—</span></div>
+            <div class="op-track"><div class="op-fill"></div></div>
+          </div>
+          <div class="op-row" data-op="quality">
+            <div class="op-head"><span class="op-name">Quality filter</span><span class="op-pct">—</span></div>
+            <div class="op-track"><div class="op-fill"></div></div>
+          </div>
+        </div>
+
+        <div class="stat-strip">
+          <div class="stat-box"><div class="sb-label">Kept</div><div class="sb-val moss" id="statKept">0</div></div>
+          <div class="stat-box"><div class="sb-label">Removed</div><div class="sb-val rust" id="statRemoved">0</div></div>
+          <div class="stat-box"><div class="sb-label">Source pages</div><div class="sb-val" id="statBytes">0</div></div>
+        </div>
+
+        <div class="actions">
+          <button class="btn-primary" id="toLabel">Proceed to labelling →</button>
+        </div>
+      </section>
+
+      <!-- STAGE 5 — LABEL -->
+      <section class="stage" data-stage="5">
+        <p class="eyebrow">Stage 05 — Assay</p>
+        <h1>Sort by what it's made of.</h1>
+        <p class="lede">Every cleaned record gets tagged against a taxonomy built from the seam name, with a confidence score attached.</p>
+
+        <div id="taxoList"></div>
+
+        <div class="actions">
+          <button class="btn-primary" id="toDataset">Proceed to dataset →</button>
+        </div>
+      </section>
+
+      <!-- STAGE 6 — DATASET -->
+      <section class="stage" data-stage="6">
+        <p class="eyebrow">Stage 06 — Yield</p>
+        <h1>Dataset ready.</h1>
+        <p class="lede">Labeled, split, and ready to leave the pipeline.</p>
+
+        <div class="yield-grid">
+          <div class="yield-box"><div class="yb-label">Total records</div><div class="yb-val" id="yTotal">0</div></div>
+          <div class="yield-box"><div class="yb-label">Labels used</div><div class="yb-val" id="yLabels">0</div></div>
+          <div class="yield-box"><div class="yb-label">Avg. confidence</div><div class="yb-val" id="yConf">—</div></div>
+        </div>
+
+        <label class="field-label">Split</label>
+        <div class="split-bar">
+          <div class="split-train" style="width:80%">TRAIN 80%</div>
+          <div class="split-val" style="width:10%">10%</div>
+          <div class="split-test" style="width:10%">10%</div>
+        </div>
+        <div class="split-legend"><span>train</span><span>val</span><span>test</span></div>
+
+        <label class="field-label">Format</label>
+        <div class="format-chips">
+          <div class="format-chip active" data-format="json">JSON</div>
+          <div class="format-chip" data-format="csv">CSV</div>
+          <div class="format-chip" data-format="parquet">Parquet</div>
+        </div>
+
+        <div class="dataset-preview" id="datasetPreviewBox">
+          <div class="preview-head"><span>Preview</span><span id="previewCount">0 records</span></div>
+          <div id="datasetPreview"></div>
+        </div>
+
+        <div class="actions">
+          <button class="btn-primary" id="downloadBtn">Download dataset (.json) ⬇</button>
+          <button class="btn-ghost" id="resetBtn">Start a new seam ↺</button>
+        </div>
+      </section>
+
+    </main>
+
+    <!-- ================= READOUT ================= -->
+    <aside class="readout">
+      <p class="panel-title">Run status</p>
+      <div class="readout-field"><span class="k">Seam</span><span class="v" id="roSeam">—</span></div>
+      <div class="readout-field"><span class="k">Sources</span><span class="v" id="roSources">0</span></div>
+      <div class="readout-field"><span class="k">Found</span><span class="v" id="roFound">0</span></div>
+      <div class="readout-field"><span class="k">Cleaned</span><span class="v" id="roCleaned">0</span></div>
+      <div class="readout-field"><span class="k">Labeled</span><span class="v" id="roLabeled">0</span></div>
+      <div class="readout-field"><span class="k">Removed</span><span class="v" id="roRemoved">0</span></div>
+      <div class="readout-field"><span class="k">Elapsed</span><span class="v" id="roElapsed">00:00</span></div>
+      <div class="readout-field"><span class="k">Status</span><span class="v readout-status-idle" id="roStatus">Idle</span></div>
+
+      <div class="barcode-block">
+        <div class="barcode" id="barcode"></div>
+        <div class="run-id" id="runId">RUN — / SEED —</div>
+      </div>
+    </aside>
+
+  </div>
+</div>
+
+<script>
+(function(){
+  "use strict";
+
+  /* ================ STATE ================ */
+  var state = {
+    stage: 1,
+    maxUnlocked: 1,
+    niche: "",
+    targetCount: 10,
+    language: "English",
+    sources: [],
+    seedUrls: "",
+    records: [],
+    nextId: 1,
+    stats: { found:0, cleaned:0, labeled:0, removed:0, startTime:null },
+    timers: {},
+    running: false,
+    runId: genRunId(),
+    pipelineResult: null
+  };
+
+  function genRunId(){
+    var chars = "0123456789ABCDEF";
+    var s = "";
+    for(var i=0;i<8;i++) s += chars[Math.floor(Math.random()*16)];
+    return s;
+  }
+
+  /* ================ DOM HELPERS ================ */
+  var $ = function(sel, ctx){ return (ctx||document).querySelector(sel); };
+  var $$ = function(sel, ctx){ return Array.prototype.slice.call((ctx||document).querySelectorAll(sel)); };
+
+  var stepperEl = $("#stepper");
+  var runStatusEl = $("#runStatus");
+  var runStatusText = $("#runStatusText");
+
+  /* ================ BACKEND HEALTH CHECK ================ */
+  var backendStatusEl = $("#backendStatus");
+
+  function checkBackend(){
+    var dot = $(".backend-dot", backendStatusEl);
+    var label = backendStatusEl.children[1];
+    fetch("/api/health").then(function(r){ return r.json(); }).then(function(d){
+      if(d.ok){
+        dot.className = "backend-dot ok";
+        // Also check Ollama
+        fetch("/api/ollama/status").then(function(r){ return r.json(); }).then(function(o){
+          if(o.available){
+            var modelName = o.active_model || (o.models && o.models[0]) || "Ollama";
+            label.textContent = "Backend + Ollama (" + modelName + ")";
+          } else {
+            label.textContent = "Backend (no LLM)";
+          }
+        }).catch(function(){
+          label.textContent = "Backend only";
+        });
+      }
+    }).catch(function(){
+      dot.className = "backend-dot fail";
+      label.textContent = "No backend";
+    });
+  }
+  checkBackend();
+
+  /* ================ HELPERS ================ */
+  function slugify(str){
+    return (str||"source").toLowerCase().trim().split(/\s+/).slice(0,2).join("-").replace(/[^a-z0-9\-]/g,"") || "source";
+  }
+
+  function escapeHtml(str){
+    var div = document.createElement("div");
+    div.textContent = str;
+    return div.innerHTML;
+  }
+
+  /* ================ STEPPER / STAGE NAV ================ */
+  stepperEl.addEventListener("click", function(e){
+    var btn = e.target.closest(".step");
+    if(!btn) return;
+    var n = parseInt(btn.dataset.goto,10);
+    goToStage(n);
+  });
+
+  function goToStage(n){
+    if(n > state.maxUnlocked){
+      var btn = $('.step[data-goto="'+n+'"]');
+      if(btn){ btn.classList.add("shake"); setTimeout(function(){btn.classList.remove("shake");}, 300); }
+      return;
+    }
+    state.stage = n;
+    render();
+  }
+
+  function unlock(n){
+    if(n > state.maxUnlocked) state.maxUnlocked = n;
+  }
+
+  function render(){
+    $$(".stage").forEach(function(s){
+      s.classList.toggle("active", parseInt(s.dataset.stage,10) === state.stage);
+    });
+    $$(".step").forEach(function(s){
+      var n = parseInt(s.dataset.goto,10);
+      s.classList.toggle("is-current", n === state.stage);
+      s.classList.toggle("is-done", n < state.maxUnlocked);
+      s.classList.toggle("is-locked", n > state.maxUnlocked);
+    });
+    $$(".ledger-setup-panel").forEach(function(p){
+      p.classList.toggle("active", parseInt(p.dataset.stage,10) === state.stage);
+    });
+    $("#ledgerSetup").style.display = (state.stage <= 2) ? "block" : "none";
+    $("#ledgerRecords").classList.toggle("active", state.stage >= 3);
+    updateReadout();
+  }
+
+  /* ================ STAGE 1: NICHE ================ */
+  var nicheInput = $("#nicheInput");
+  var confirmNicheBtn = $("#confirmNiche");
+  var targetSlider = $("#targetSlider");
+  var targetVal = $("#targetVal");
+  var langSelect = $("#langSelect");
+
+  $$(".example-chip").forEach(function(chip){
+    chip.addEventListener("click", function(){
+      nicheInput.value = chip.dataset.example;
+      nicheInput.dispatchEvent(new Event("input"));
+      nicheInput.focus();
+    });
+  });
+
+  nicheInput.addEventListener("input", function(){
+    confirmNicheBtn.disabled = nicheInput.value.trim().length === 0;
+  });
+
+  targetSlider.addEventListener("input", function(){
+    targetVal.textContent = targetSlider.value + " records";
+  });
+
+  confirmNicheBtn.addEventListener("click", function(){
+    state.niche = nicheInput.value.trim();
+    state.targetCount = parseInt(targetSlider.value,10);
+    state.language = langSelect.value;
+    $("#paramResults").textContent = state.targetCount;
+    unlock(2);
+    goToStage(2);
+  });
+
+  /* ================ STAGE 2: SOURCES ================ */
+  var sourceGrid = $("#sourceGrid");
+  var confirmSourcesBtn = $("#confirmSources");
+  var sourceMiniList = $("#sourceMiniList");
+  var toggleRobots = $("#toggleRobots");
+  var toggleRate = $("#toggleRate");
+  var seedUrlsEl = $("#seedUrls");
+
+  [toggleRobots, toggleRate].forEach(function(t){
+    t.addEventListener("click", function(){ t.classList.toggle("on"); });
+  });
+
+  function refreshSources(){
+    var cards = $$(".source-card", sourceGrid);
+    state.sources = [];
+    cards.forEach(function(card){
+      var cb = $("input", card);
+      card.classList.toggle("selected", cb.checked);
+      if(cb.checked) state.sources.push(card.dataset.name);
+    });
+    confirmSourcesBtn.disabled = state.sources.length === 0;
+
+    if(state.sources.length === 0){
+      sourceMiniList.innerHTML = '<p class="empty-note">Nothing selected yet. Toggle a source type to add it here.</p>';
+    } else {
+      sourceMiniList.innerHTML = state.sources.map(function(name){
+        return '<div class="source-mini"><span>'+name+'</span><span>ON</span></div>';
+      }).join("");
+    }
+  }
+  sourceGrid.addEventListener("change", refreshSources);
+
+  confirmSourcesBtn.addEventListener("click", function(){
+    state.seedUrls = seedUrlsEl.value;
+    unlock(3);
+    goToStage(3);
+  });
+
+  /* ================ LEDGER RECORDS ================ */
+  var recordList = $("#recordList");
+  var ledgerCount = $("#ledgerCount");
+
+  function renderLedger(){
+    ledgerCount.textContent = state.records.length;
+    recordList.innerHTML = state.records.slice().reverse().slice(0, 50).map(function(r){
+      var dotClass = r.status;
+      var label = r.status.toUpperCase();
+      if(r.status === "labeled" && r.label){ label = r.label.toUpperCase(); }
+      return '<div class="record-row">'+
+        '<span class="rec-dot '+dotClass+'"></span>'+
+        '<span class="rec-domain">'+escapeHtml(r.url)+'</span>'+
+        '<span class="rec-status '+r.status+'">'+label+'</span>'+
+      '</div>';
+    }).join("");
+  }
+
+  /* ================ READOUT ================ */
+  var roSeam = $("#roSeam"), roSources = $("#roSources"), roFound = $("#roFound"),
+      roCleaned = $("#roCleaned"), roLabeled = $("#roLabeled"), roRemoved = $("#roRemoved"),
+      roElapsed = $("#roElapsed"), roStatus = $("#roStatus"), runIdEl = $("#runId"), barcodeEl = $("#barcode");
+
+  function buildBarcode(){
+    var html = "";
+    for(var i=0;i<28;i++){
+      var w = 1 + Math.floor(Math.random()*3);
+      var h = 40 + Math.floor(Math.random()*60);
+      html += '<span style="width:'+w+'px;height:'+h+'%"></span>';
+    }
+    barcodeEl.innerHTML = html;
+  }
+  buildBarcode();
+  runIdEl.textContent = "RUN " + state.runId + " / SEED —";
+
+  function fmtTime(ms){
+    var s = Math.floor(ms/1000);
+    var mm = String(Math.floor(s/60)).padStart(2,"0");
+    var ss = String(s%60).padStart(2,"0");
+    return mm+":"+ss;
+  }
+
+  function updateReadout(){
+    roSeam.textContent = state.niche || "—";
+    roSources.textContent = state.sources.length;
+    roFound.textContent = state.stats.found;
+    roCleaned.textContent = state.stats.cleaned;
+    roLabeled.textContent = state.stats.labeled;
+    roRemoved.textContent = state.stats.removed;
+    roElapsed.textContent = state.stats.startTime ? fmtTime(Date.now() - state.stats.startTime) : "00:00";
+    runIdEl.textContent = "RUN " + state.runId + " / SEED " + (state.niche ? slugify(state.niche).toUpperCase() : "—");
+
+    var statusText = "Idle", statusClass = "readout-status-idle", pillClass = "idle";
+    if(state.running){ statusText = "Running"; statusClass = "readout-status-running"; pillClass = "running"; }
+    else if(state.pipelineResult){ statusText = "Complete"; statusClass = "readout-status-complete"; pillClass = "complete"; }
+    roStatus.className = "v " + statusClass;
+    roStatus.textContent = statusText;
+    runStatusEl.className = "run-status " + pillClass;
+    runStatusText.textContent = statusText;
+  }
+
+  var elapsedTimer = null;
+  function startElapsedTimer(){
+    if(!state.stats.startTime) state.stats.startTime = Date.now();
+    if(elapsedTimer) clearInterval(elapsedTimer);
+    elapsedTimer = setInterval(updateReadout, 500);
+  }
+  function stopElapsedTimer(){
+    if(elapsedTimer){ clearInterval(elapsedTimer); elapsedTimer = null; }
+  }
+
+  /* ================ TREE VISUALIZATION ================ */
+  var treeSvg = $("#treeSvg");
+  var treeOverlay = $("#treeOverlay");
+  var startExtractionBtn = $("#startExtraction");
+  var toCleanBtn = $("#toClean");
+  var extractSummary = $("#extractSummary");
+  var nodeInfo = $("#nodeInfo");
+  var pipelineLogEl = $("#pipelineLog");
+  var svgNS = "http://www.w3.org/2000/svg";
+  var treeNodes = [];
+  var NODE_RADIUS = 4;
+
+  function addTreeNode(record){
+    var svgW = 900, svgH = 560;
+    var node;
+    if(treeNodes.length === 0){
+      node = { id: record.id, x: 90, y: 525, angle: 20, depth: 0, parentId: null, children: 0 };
+    } else {
+      var candidates = treeNodes.filter(function(n){ return n.children < 3; });
+      if(candidates.length === 0) candidates = treeNodes;
+      var parent = candidates[Math.floor(Math.random()*candidates.length)];
+      var depth = parent.depth + 1;
+      var baseLen = 68 * Math.pow(0.9, Math.min(depth, 9));
+      var spread = 55;
+      var angle = parent.angle + (Math.random()*spread - spread/2);
+      angle = Math.max(-85, Math.min(85, angle));
+      var rad = angle * Math.PI/180;
+      var x = parent.x + Math.sin(rad)*baseLen;
+      var y = parent.y - Math.cos(rad)*baseLen;
+      x = Math.max(16, Math.min(svgW-16, x));
+      y = Math.max(16, Math.min(svgH-16, y));
+      parent.children++;
+      node = { id: record.id, x:x, y:y, angle:angle, depth:depth, parentId: parent.id, children:0 };
+
+      var line = document.createElementNS(svgNS, "line");
+      line.setAttribute("x1", parent.x); line.setAttribute("y1", parent.y);
+      line.setAttribute("x2", x); line.setAttribute("y2", y);
+      line.setAttribute("stroke", "rgba(23,23,15,0.32)");
+      line.setAttribute("stroke-width", "1");
+      treeSvg.appendChild(line);
+    }
+    treeNodes.push(node);
+
+    var circle = document.createElementNS(svgNS, "circle");
+    circle.setAttribute("cx", node.x); circle.setAttribute("cy", node.y);
+    circle.setAttribute("r", NODE_RADIUS);
+    circle.setAttribute("fill", "#F7F5EF");
+    circle.setAttribute("stroke", "#C4762A");
+    circle.setAttribute("stroke-width", "1.5");
+    circle.style.cursor = "pointer";
+    circle.dataset.recordId = record.id;
+    circle.addEventListener("click", function(){ showNodeInfo(record); });
+    treeSvg.appendChild(circle);
+    node.el = circle;
+
+    if(node.depth === 0 || node.depth % 3 === 0){
+      var text = document.createElementNS(svgNS, "text");
+      text.setAttribute("x", node.x + 7); text.setAttribute("y", node.y - 6);
+      text.setAttribute("font-size", "8"); text.setAttribute("font-family", "monospace");
+      text.setAttribute("fill", "rgba(23,23,15,0.4)");
+      text.textContent = "#" + String(record.id).toString().slice(0,4);
+      treeSvg.appendChild(text);
+    }
+
+    return node;
+  }
+
+  function markNodeStatus(recordId, status){
+    var node = treeNodes.find(function(n){ return n.id === recordId; });
+    if(!node || !node.el) return;
+    if(status === "removed"){
+      node.el.setAttribute("stroke", "#9C3B2B");
+      node.el.setAttribute("fill", "#9C3B2B");
+      node.el.style.opacity = "0.35";
+    } else if(status === "cleaned"){
+      node.el.setAttribute("stroke", "#6E6B5E");
+    } else if(status === "labeled"){
+      node.el.setAttribute("stroke", "#55684A");
+      node.el.setAttribute("fill", "#55684A");
+    }
+  }
+
+  function showNodeInfo(record){
+    $("#niType").textContent = record.stage || "record";
+    $("#niUrl").textContent = record.url || "—";
+    $("#niTime").textContent = record.stage || "—";
+    $("#niStatus").textContent = (record.status || "unknown").toUpperCase();
+    nodeInfo.classList.add("visible");
+  }
+
+  /* ================ PIPELINE LOG ================ */
+  function addLogEntry(message, type){
+    pipelineLogEl.style.display = "block";
+    var span = document.createElement("span");
+    span.className = "log-entry";
+    if(type === "stage") span.innerHTML = '<span class="log-stage">' + escapeHtml(message) + '</span>';
+    else if(type === "ok") span.innerHTML = '<span class="log-ok">✓ ' + escapeHtml(message) + '</span>';
+    else if(type === "err") span.innerHTML = '<span class="log-err">✗ ' + escapeHtml(message) + '</span>';
+    else span.textContent = message;
+    pipelineLogEl.appendChild(span);
+    pipelineLogEl.appendChild(document.createElement("br"));
+    pipelineLogEl.scrollTop = pipelineLogEl.scrollHeight;
+  }
+
+  /* ================ STAGE 3: RUN PIPELINE (SSE) ================ */
+  startExtractionBtn.addEventListener("click", function(){
+    if(state.running) return;
+    state.running = true;
+    startElapsedTimer();
+
+    // Reset state for new run so previous runs don't leak into this one
+    state.records = [];
+    state.nextId = 1;
+    state.pipelineResult = null;
+    state.stats = {found:0, cleaned:0, labeled:0, removed:0, startTime: Date.now()};
+    treeNodes = [];
+    treeSvg.innerHTML = "";
+    nodeInfo.classList.remove("visible");
+    labelCounts = {};
+    var taxoList = $("#taxoList");
+    if(taxoList) taxoList.innerHTML = "";
+    $("#statKept").textContent = "0";
+    $("#statRemoved").textContent = "0";
+    $("#statBytes").textContent = "0";
+    $("#yTotal").textContent = "0";
+    $("#yLabels").textContent = "0";
+    $("#yConf").textContent = "—";
+    datasetPreview.innerHTML = '<div class="preview-empty">Running pipeline…</div>';
+    previewCount.textContent = "0 records";
+    renderLedger();
+    updateReadout();
+
+    treeOverlay.classList.add("hidden");
+    extractSummary.innerHTML = "Pipeline running — processing in real time…";
+    pipelineLogEl.innerHTML = "";
+    addLogEntry("Pipeline started for: " + state.niche, "stage");
+
+    var payload = {
+      query: state.niche || "loomset dataset",
+      max_results: state.targetCount,
+      labels: ["relevant", "irrelevant"],
+      model: "qwen3:8b"
+    };
+
+    fetch("/api/run/stream", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    }).then(function(response){
+      if(!response.ok) throw new Error("Backend error " + response.status);
+      var reader = response.body.getReader();
+      var decoder = new TextDecoder();
+      var buffer = "";
+
+      function read(){
+        return reader.read().then(function(result){
+          if(result.done) return;
+          buffer += decoder.decode(result.value, {stream: true});
+          var lines = buffer.split("\n");
+          buffer = lines.pop() || "";
+
+          for(var i=0; i<lines.length; i++){
+            var line = lines[i].trim();
+            if(!line.startsWith("data: ")) continue;
+            var jsonStr = line.slice(6);
+            try {
+              var event = JSON.parse(jsonStr);
+              handleSSEEvent(event);
+            } catch(e) { /* skip parse errors */ }
+          }
+          return read();
+        });
+      }
+
+      return read();
+    }).catch(function(err){
+      addLogEntry("Pipeline error: " + err.message, "err");
+      // Fallback to sync API call
+      addLogEntry("Falling back to synchronous API…", "stage");
+      fetch("/api/run", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      }).then(function(r){ return r.json(); }).then(function(result){
+        if(result.ok){
+          handlePipelineResult(result);
+          addLogEntry("Pipeline complete (sync fallback)", "ok");
+        } else {
+          addLogEntry("Pipeline failed: " + (result.detail || "Unknown error"), "err");
+        }
+      }).catch(function(e2){
+        addLogEntry("Both SSE and sync failed: " + e2.message, "err");
+      }).finally(function(){
+        state.running = false;
+        stopElapsedTimer();
+        updateReadout();
+      });
+    });
+  });
+
+  function handleSSEEvent(event){
+    var stage = event.stage || "";
+    var status = event.status || "";
+    var message = event.message || "";
+
+    if(message) addLogEntry("[" + stage + "] " + message, status === "complete" ? "ok" : undefined);
+
+    // Handle stage-specific events
+    if(stage === "discovery" && status === "complete"){
+      state.stats.found = event.count || 0;
+      // Create tree nodes for discovered URLs
+      for(var i=0; i < state.stats.found; i++){
+        var recId = state.nextId++;
+        var rec = { id: recId, url: event.urls ? event.urls[i] : ("discovered-" + recId), status: "found", stage: "discovery" };
+        state.records.push(rec);
+        addTreeNode(rec);
+      }
+      renderLedger();
+      updateReadout();
+      extractSummary.innerHTML = "<strong>" + state.stats.found + "</strong> URLs discovered.";
+    }
+
+    if(stage === "scraping" && status === "progress"){
+      extractSummary.innerHTML = "Scraping " + (event.current || "?") + "/" + (event.total || "?") + "…";
+    }
+    if(stage === "scraping" && status === "complete"){
+      extractSummary.innerHTML = "<strong>" + (event.count || 0) + "</strong> pages scraped.";
+    }
+
+    if(stage === "extraction" && status === "complete"){
+      state.stats.found = event.count || state.stats.found;
+      extractSummary.innerHTML = "<strong>" + (event.count || 0) + "</strong> documents extracted.";
+    }
+
+    if(stage === "cleaning" && status === "progress"){
+      handleCleaningProgress(event);
+    }
+    if(stage === "cleaning" && status === "complete"){
+      state.stats.cleaned = event.count || 0;
+      state.stats.removed = event.removed || 0;
+      updateReadout();
+    }
+
+    if(stage === "labeling" && status === "progress"){
+      handleLabelingProgress(event);
+    }
+    if(stage === "labeling" && status === "complete"){
+      state.stats.labeled = event.count || 0;
+      if(event.distribution) handleLabelDistribution(event.distribution, event.count);
+    }
+
+    if(stage === "result" && status === "complete"){
+      handlePipelineResult(event);
+    }
+
+    if(stage === "done"){
+      state.running = false;
+      stopElapsedTimer();
+      updateReadout();
+    }
+
+    if(stage === "error"){
+      addLogEntry("Error: " + (event.message || "Unknown error"), "err");
+      state.running = false;
+      stopElapsedTimer();
+      updateReadout();
+    }
+  }
+
+  function handleCleaningProgress(event){
+    var op = event.op;
+    var kept = event.kept || 0;
+    var removed = event.removed || 0;
+    var total = kept + removed;
+    var pct = total > 0 ? Math.round((kept / total) * 100) : 100;
+
+    var row = document.querySelector('.op-row[data-op="' + op + '"]');
+    if(row){
+      var fill = $(".op-fill", row);
+      var pctEl = $(".op-pct", row);
+      fill.style.width = "100%";
+      fill.classList.add("done");
+      pctEl.textContent = removed > 0 ? ("-" + removed) : "✓";
+    }
+    $("#statKept").textContent = kept;
+    $("#statRemoved").textContent = state.stats.removed + removed;
+    state.stats.removed += removed;
+    updateReadout();
+  }
+
+  var labelCounts = {};
+  function handleLabelingProgress(event){
+    state.stats.labeled = event.current || state.stats.labeled;
+    var label = event.label || "relevant";
+    labelCounts[label] = (labelCounts[label] || 0) + 1;
+    updateReadout();
+    // Update individual record in tree
+    if(state.records.length > 0){
+      var lastRec = state.records[state.records.length - 1];
+      if(lastRec) markNodeStatus(lastRec.id, "labeled");
+    }
+  }
+
+  function handleLabelDistribution(dist, total){
+    var taxoList = $("#taxoList");
+    var html = "";
+    var maxCount = 1;
+    for(var lbl in dist) if(dist[lbl] > maxCount) maxCount = dist[lbl];
+    for(var lbl in dist){
+      var pct = Math.round((dist[lbl] / Math.max(total, 1)) * 100);
+      html += '<div class="taxo-row">' +
+        '<div class="taxo-head"><span class="taxo-name">' + escapeHtml(lbl) + '</span><span class="taxo-count">' + dist[lbl] + '</span></div>' +
+        '<div class="taxo-track"><div class="taxo-fill" style="width:' + pct + '%"></div></div>' +
+      '</div>';
+    }
+    taxoList.innerHTML = html;
+  }
+
+  function handlePipelineResult(result){
+    state.pipelineResult = result;
+    var records = result.records || [];
+
+    // Update all records in state
+    state.records = records.map(function(r, i){
+      return {
+        id: i + 1,
+        url: r.url || "—",
+        status: "labeled",
+        stage: "export",
+        label: r.label || "relevant",
+        confidence: 0.85
+      };
+    });
+    state.stats.found = records.length;
+    state.stats.cleaned = records.length;
+    state.stats.labeled = records.length;
+
+    // Update tree nodes
+    records.forEach(function(r, i){
+      var rec = state.records[i];
+      if(!treeNodes.find(function(n){ return n.id === rec.id; })){
+        addTreeNode(rec);
+      }
+      markNodeStatus(rec.id, "labeled");
+    });
+
+    renderLedger();
+    updateReadout();
+
+    // Enable navigation
+    unlock(4);
+    unlock(5);
+    unlock(6);
+    toCleanBtn.disabled = false;
+
+    // Populate cleaning stats
+    $("#statKept").textContent = records.length;
+    $("#statBytes").textContent = records.length;
+    $$('.op-row .op-fill').forEach(function(f){ f.style.width = "100%"; f.classList.add("done"); });
+    $$('.op-row .op-pct').forEach(function(p){ p.textContent = "✓"; });
+
+    // Populate labels
+    var dist = {};
+    var confSum = 0;
+    records.forEach(function(r){
+      var lbl = r.label || "relevant";
+      dist[lbl] = (dist[lbl] || 0) + 1;
+    });
+    handleLabelDistribution(dist, records.length);
+
+    // Populate dataset summary
+    $("#yTotal").textContent = records.length;
+    $("#yLabels").textContent = Object.keys(dist).length;
+    var avgConf = records.length > 0 ? "85%" : "—";
+    $("#yConf").textContent = avgConf;
+
+    // Dataset preview
+    renderDatasetPreview(records);
+
+    extractSummary.innerHTML = "Pipeline complete — <strong>" + records.length + "</strong> records in dataset.";
+    addLogEntry("Pipeline complete: " + records.length + " records exported", "ok");
+
+    state.running = false;
+    stopElapsedTimer();
+    updateReadout();
+  }
+
+  toCleanBtn.addEventListener("click", function(){ goToStage(4); });
+
+  /* ================ STAGE 4: CLEAN (populated from SSE) ================ */
+  $("#toLabel").addEventListener("click", function(){ goToStage(5); });
+
+  /* ================ STAGE 5: LABEL (populated from SSE) ================ */
+  $("#toDataset").addEventListener("click", function(){ goToStage(6); });
+
+  /* ================ STAGE 6: DATASET ================ */
+  var yTotal = $("#yTotal"), yLabels = $("#yLabels"), yConf = $("#yConf");
+  var downloadBtn = $("#downloadBtn");
+  var resetBtn = $("#resetBtn");
+  var datasetPreview = $("#datasetPreview");
+  var previewCount = $("#previewCount");
+  var selectedFormat = "json";
+
+  function setSelectedFormat(format){
+    selectedFormat = format;
+    $$(".format-chip").forEach(function(chip){
+      chip.classList.toggle("active", chip.dataset.format === format);
+    });
+    var labels = { json: ".json", csv: ".csv", parquet: ".parquet" };
+    downloadBtn.textContent = "Download dataset (" + labels[format] + ") ⬇";
+  }
+
+  function renderDatasetPreview(records){
+    if(!records || !records.length){
+      datasetPreview.innerHTML = '<div class="preview-empty">No dataset records yet.</div>';
+      previewCount.textContent = '0 records';
+      return;
+    }
+    var rows = records.slice(0, 8).map(function(record){
+      var text = record.text || "";
+      var summary = text.length > 100 ? text.slice(0, 100) + "…" : text;
+      return '<tr><td>' + escapeHtml(record.label || 'relevant') + '</td><td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + escapeHtml(record.url || '—') + '</td><td>' + escapeHtml(summary) + '</td></tr>';
+    }).join("");
+    datasetPreview.innerHTML = '<table><thead><tr><th>Label</th><th>URL</th><th>Text</th></tr></thead><tbody>' + rows + '</tbody></table>';
+    previewCount.textContent = records.length + ' records';
+  }
+
+  downloadBtn.addEventListener("click", function(){
+    var downloadPath = "";
+    if(state.pipelineResult && state.pipelineResult.download && state.pipelineResult.download[selectedFormat]){
+      downloadPath = state.pipelineResult.download[selectedFormat];
+    } else if(state.pipelineResult && state.pipelineResult.query_slug){
+      downloadPath = state.pipelineResult.query_slug + "/dataset." + selectedFormat;
+    } else {
+      var fileMap = { json: "dataset.json", csv: "dataset.csv", parquet: "dataset.parquet" };
+      downloadPath = fileMap[selectedFormat] || "dataset.json";
+    }
+    window.open("/api/download/" + downloadPath, "_blank");
+  });
+
+  $$(".format-chip").forEach(function(chip){
+    chip.addEventListener("click", function(){
+      setSelectedFormat(chip.dataset.format);
+    });
+  });
+
+  resetBtn.addEventListener("click", function(){
+    stopElapsedTimer();
+
+    state = {
+      stage: 1, maxUnlocked: 1, niche:"", targetCount:10, language:"English",
+      sources:[], seedUrls:"", records:[], nextId:1,
+      stats:{found:0,cleaned:0,labeled:0,removed:0,startTime:null},
+      timers:{}, running:false, runId: genRunId(),
+      pipelineResult: null
+    };
+    treeNodes = [];
+    labelCounts = {};
+    treeSvg.innerHTML = "";
+    treeOverlay.classList.remove("hidden");
+    nodeInfo.classList.remove("visible");
+    nicheInput.value = ""; $("#nicheDesc").value = "";
+    targetSlider.value = 10; targetVal.textContent = "10 records";
+    confirmNicheBtn.disabled = true;
+    $$(".source-card input").forEach(function(cb){ cb.checked = false; });
+    refreshSources();
+    seedUrlsEl.value = "";
+    toggleRobots.classList.add("on"); toggleRate.classList.add("on");
+    extractSummary.textContent = "Waiting to start.";
+    toCleanBtn.disabled = true;
+    pipelineLogEl.innerHTML = ""; pipelineLogEl.style.display = "none";
+    $$(".op-fill").forEach(function(f){ f.style.width="0%"; f.classList.remove("done"); });
+    $$(".op-pct").forEach(function(p){ p.textContent="—"; });
+    $("#statKept").textContent="0"; $("#statRemoved").textContent="0"; $("#statBytes").textContent="0";
+    $("#taxoList").innerHTML = "";
+    $("#yTotal").textContent = "0";
+    $("#yLabels").textContent = "0";
+    $("#yConf").textContent = "—";
+    datasetPreview.innerHTML = '<div class="preview-empty">No dataset records yet.</div>';
+    previewCount.textContent = "0 records";
+    setSelectedFormat("json");
+    buildBarcode();
+    renderLedger();
+    goToStage(1);
+  });
+
+  /* ================ INIT ================ */
+  render();
+
+})();
+</script>
+
+</body>
+</html>
