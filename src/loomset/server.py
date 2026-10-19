@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import io
 import json
 import queue
 import threading
@@ -9,11 +10,12 @@ from typing import Any
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import FileResponse, StreamingResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from loomset.labeling.ollama_client import check_ollama_status, _get_client
+from loomset.discovery.ddg_search import fetch_urls
 from loomset.pipeline import run_pipeline, status_summary
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -47,7 +49,8 @@ def _download_tokens(query_slug: str) -> dict[str, str]:
 
 class RunRequest(BaseModel):
     query: str = Field(..., min_length=1)
-    max_results: int = 10
+    max_results: int = Field(default=10, ge=1, le=100)
+    seed_urls: list[str] = Field(default_factory=list)
     db_path: str | None = None
     export_dir: str | None = None
     data_dir: str | None = None
@@ -68,6 +71,36 @@ def serve_index_alias() -> FileResponse:
 @app.get("/api/health")
 def health() -> dict[str, object]:
     return {"ok": True, "service": "loomset"}
+
+
+@app.get("/api/discover")
+def api_discover(query: str, max_results: int = 10) -> dict[str, object]:
+    """Find real web pages for the interactive dashboard using all configured backends."""
+    if not query.strip():
+        raise HTTPException(status_code=422, detail="Query must not be empty")
+    urls = fetch_urls(query, max_results=max(1, min(max_results, 100)))
+    return {"ok": True, "urls": urls, "count": len(urls)}
+
+
+@app.post("/api/export/parquet")
+async def export_parquet(request: Request) -> Response:
+    """Create a Parquet download from extracted records sent by the web UI."""
+    import pandas as pd
+
+    try:
+        payload = await request.json()
+        records = payload.get("records", []) if isinstance(payload, dict) else []
+        if not isinstance(records, list) or any(not isinstance(record, dict) for record in records):
+            raise ValueError("records must be a list of objects")
+        output = io.BytesIO()
+        pd.DataFrame(records).to_parquet(output, index=False, engine="pyarrow")
+        return Response(
+            content=output.getvalue(),
+            media_type="application/vnd.apache.parquet",
+            headers={"Content-Disposition": 'attachment; filename="loomset-dataset.parquet"'},
+        )
+    except Exception as exc:  # pragma: no cover - defensive API guard
+        raise HTTPException(status_code=400, detail="Could not create Parquet export") from exc
 
 
 @app.get("/api/ollama/status")
@@ -136,6 +169,7 @@ def api_run(request: RunRequest) -> dict[str, object]:
         result = run_pipeline(
             query=request.query,
             max_results=request.max_results,
+            seed_urls=request.seed_urls,
             db_path=request.db_path,
             export_dir=request.export_dir,
             data_dir=request.data_dir,
@@ -174,6 +208,7 @@ async def api_run_stream(request: RunRequest) -> StreamingResponse:
             result = run_pipeline(
                 query=request.query,
                 max_results=request.max_results,
+                seed_urls=request.seed_urls,
                 db_path=request.db_path,
                 export_dir=request.export_dir,
                 data_dir=request.data_dir,

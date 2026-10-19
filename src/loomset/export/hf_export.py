@@ -44,13 +44,18 @@ def export_dataset(records: list[dict], export_dir: str | Path) -> tuple[Path, P
     export_path.mkdir(parents=True, exist_ok=True)
     records = _unique_records(records)
 
-    # Full-fidelity records for JSON / Parquet (keep multi-line text)
+    # Full-fidelity records for JSON / Parquet (keep multi-line text and provenance).
     rich_records = [
         {
+            "id": str(record.get("id") or ""),
             "text": record.get("text") or "",
             "label": record.get("label") or "",
+            "confidence": record.get("confidence"),
             "url": record.get("url") or "",
             "domain": record.get("domain") or "",
+            "title": record.get("title") or "",
+            "language": record.get("language") or "",
+            "fetched_at": record.get("fetched_at") or "",
             "label_source": record.get("label_source") or "auto",
             "query": record.get("query") or "",
         }
@@ -60,7 +65,7 @@ def export_dataset(records: list[dict], export_dir: str | Path) -> tuple[Path, P
     if rich_records:
         dataset = Dataset.from_list(rich_records)
     else:
-        dataset = Dataset.from_dict({field: [] for field in ["text", "label", "url", "domain", "label_source", "query"]})
+        dataset = Dataset.from_dict({field: [] for field in ["id", "text", "label", "confidence", "url", "domain", "title", "language", "fetched_at", "label_source", "query"]})
 
     dataset_path = export_path / "dataset.json"
     dataset.to_json(str(dataset_path))
@@ -71,16 +76,21 @@ def export_dataset(records: list[dict], export_dir: str | Path) -> tuple[Path, P
     # CSV — one record per row, text collapsed to a single line so url/domain
     # cells are never pushed into the wrong column by spreadsheet tools.
     csv_path = export_path / "dataset.csv"
-    fieldnames = ["text", "label", "url", "domain", "label_source", "query"]
+    fieldnames = ["id", "text", "label", "confidence", "url", "domain", "title", "language", "fetched_at", "label_source", "query"]
     with csv_path.open("w", newline="", encoding="utf-8") as fh:
         writer = _csv.DictWriter(fh, fieldnames=fieldnames, quoting=_csv.QUOTE_ALL)
         writer.writeheader()
         for record in records:
             writer.writerow({
+                "id": str(record.get("id") or ""),
                 "text": _flat(record.get("text")),
                 "label": record.get("label") or "",
+                "confidence": record.get("confidence"),
                 "url": record.get("url") or "",
                 "domain": record.get("domain") or "",
+                "title": record.get("title") or "",
+                "language": record.get("language") or "",
+                "fetched_at": record.get("fetched_at") or "",
                 "label_source": record.get("label_source") or "auto",
                 "query": record.get("query") or "",
             })
@@ -113,7 +123,7 @@ def export_dataset(records: list[dict], export_dir: str | Path) -> tuple[Path, P
         f"{domain_lines}\n\n"
         "## Format\n\n"
         "Available in JSON, CSV, and Parquet formats.\n"
-        "Each record contains: `text`, `label`, `url`, `domain`, `label_source`, `query`.\n\n"
+        "Each record contains `id`, extracted `text`, `label`, `confidence`, source URL/domain/title, language, retrieval time, label source, and query.\n\n"
         "> **CSV note**: the `text` column has newlines collapsed to spaces for spreadsheet\n"
         "> compatibility. Open `dataset.json` or `dataset.parquet` for full multi-line text.\n",
         encoding="utf-8",

@@ -5,6 +5,7 @@ import logging
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Protocol
+from urllib.parse import urlparse
 from uuid import uuid4
 
 from loomset.cleaning.dedup import deduplicate_documents
@@ -90,9 +91,26 @@ def status_summary(db_path: str | Path, query: str | None = None) -> dict[str, i
         return {}
 
 
-def stage_discovery(query: str, max_results: int, db_path: str | Path, callback: ProgressCallback = _noop_progress) -> list[dict]:
+def stage_discovery(
+    query: str,
+    max_results: int,
+    db_path: str | Path,
+    callback: ProgressCallback = _noop_progress,
+    seed_urls: list[str] | None = None,
+) -> list[dict]:
     _emit(callback, "discovery", "running", message=f"Discovering URLs for '{query}'...")
-    discovered = discover_documents(query, max_results=max_results)
+    if seed_urls:
+        discovered = []
+        for seed in seed_urls:
+            parsed = urlparse(seed.strip())
+            if parsed.scheme.lower() not in {"http", "https"} or not parsed.hostname:
+                raise ValueError(f"Invalid seed URL: {seed}")
+            discovered.append({
+                "url": seed.strip(), "query": query,
+                "domain": parsed.netloc, "status": "discovered",
+            })
+    else:
+        discovered = discover_documents(query, max_results=max_results)
     new_documents: list[dict] = []
     for doc in discovered:
         record = {**doc, "fetched_at": None, "status": "discovered"}
@@ -235,7 +253,19 @@ def stage_labeling(db_path: str | Path, query: str | None = None, labels: list[s
         labeled.append({**cleaned_record, "label": label.label, "confidence": label.confidence, "label_source": "auto"})
         insert_label(db_path, cleaned_record["id"], label.label, "auto", label.confidence, False, datetime.now(timezone.utc).isoformat())
         update_status(db_path, cleaned_record["id"], "labeled")
-        _emit(callback, "labeling", "progress", current=i + 1, total=len(docs_to_label), label=label.label, confidence=label.confidence)
+        _emit(
+            callback, "labeling", "progress",
+            current=i + 1, total=len(docs_to_label), label=label.label,
+            confidence=label.confidence,
+            record_preview={
+                "id": cleaned_record["id"], "url": cleaned_record["url"],
+                "domain": cleaned_record.get("domain") or "",
+                "query": cleaned_record.get("query") or "",
+                "text": cleaned_record["text"][:500],
+                "label": label.label, "confidence": label.confidence,
+                "label_source": "auto",
+            },
+        )
 
     # Build label distribution
     label_dist: dict[str, int] = {}
@@ -291,16 +321,23 @@ def stage_export(db_path: str | Path, export_dir: str | Path, query: str | None 
             continue
         label_row = fetch_labels(db_path, doc["id"])
         cleaned_row = fetch_cleaned_text(db_path, doc["id"])
+        extracted_row = fetch_extracted_text(db_path, doc["id"])
         if not cleaned_row:
             continue
+        label = label_row[0] if label_row else {}
+        extracted = extracted_row[0] if extracted_row else {}
         exported_records.append(
             {
                 "id": doc["id"],
                 "text": cleaned_row[0]["text"],
-                "label": label_row[0]["label"] if label_row else "relevant",
+                "label": label.get("label", "relevant"),
+                "confidence": label.get("confidence"),
                 "url": doc["url"],
                 "domain": doc["domain"],
-                "label_source": label_row[0]["label_source"] if label_row else "auto",
+                "title": extracted.get("title") or "",
+                "language": extracted.get("lang") or "",
+                "fetched_at": doc.get("fetched_at") or "",
+                "label_source": label.get("label_source", "auto"),
                 "query": doc.get("query") or "",
             }
         )
@@ -324,6 +361,7 @@ def run_pipeline(
     data_dir: str | Path | None = None,
     labels: list[str] | None = None,
     seed_documents: list[dict] | None = None,
+    seed_urls: list[str] | None = None,
     callback: ProgressCallback = _noop_progress,
 ) -> dict:
     config = load_config()
@@ -349,7 +387,7 @@ def run_pipeline(
         _seed_documents(db_path, query, seed_documents)
         _emit(callback, "discovery", "complete", count=len(seed_documents), message=f"Seeded {len(seed_documents)} documents")
     else:
-        stage_discovery(query=query, max_results=max_results, db_path=db_path, callback=callback)
+        stage_discovery(query=query, max_results=max_results, db_path=db_path, callback=callback, seed_urls=seed_urls)
 
     logger.info("Stage: scraping")
     stage_scraping(db_path=db_path, query=query, min_html_chars=config.scraping.min_html_chars, dynamic_fallback=config.scraping.dynamic_fallback, callback=callback)

@@ -4,7 +4,7 @@ This document is the implementation guide for the repository. LoomSet is a local
 
 ## End-to-end flow
 
-1. A query is sent to DuckDuckGo and, when available, Wikipedia OpenSearch supplies additional results.
+1. A query is sent through multiple independent `ddgs` search backends (Bing, Brave, DuckDuckGo, Google, Mojeek, and Yahoo). Wikipedia full-text search is a last-resort fallback when web search returns no usable URLs.
 2. URLs are filtered and canonicalized. SQLite stores one document per canonical URL.
 3. Static HTTP fetching downloads newly discovered pages. Pages that fail or are too short are sent to the dynamic fetcher.
 4. Playwright renders JavaScript-heavy pages when installed. A failed page is marked `failed` and does not stop the run.
@@ -20,9 +20,11 @@ The normal status progression is `discovered -> fetched -> extracted -> cleaned 
 
 `src/loomset/discovery/ddg_search.py` and `src/loomset/storage/db.py` use the same URL identity rules: lowercase scheme and hostname, remove default ports, remove fragments, and remove a trailing path slash. `documents.url` is unique and `upsert_document` returns `True` only for a newly inserted URL.
 
+The browser dashboard starts the real pipeline through `/api/run/stream`. Its ledger and downloads are populated from the pipeline's exported records; rows without extracted text are excluded. JSONL, CSV, and Parquet exports retain the text and source provenance fields.
+
 `stage_discovery` returns only newly inserted records. Rediscovery does not replace an existing raw page, status, labels, or cleaned text. `stage_scraping` reads only `status='discovered'`, so a completed document cannot be downloaded again during a later seam. `export_dataset` applies the same canonical identity as a final defense against duplicate exported URLs.
 
-The old synthetic discovery fallback has been removed. If search and Wikipedia return no usable results, discovery returns an empty list. The CLI never downloads fabricated `example.com` pages. `run_pipeline(seed_documents=...)` remains only as a fixture hook for deterministic tests; it deliberately bypasses network discovery and should not be used for production data.
+The old synthetic discovery fallback has been removed. Search-provider failures are logged and isolated so one unavailable provider does not discard results from another. If all web providers and Wikipedia return no usable results, discovery returns an empty list. The CLI never downloads fabricated `example.com` pages. `run_pipeline(seed_documents=...)` remains only as a fixture hook for deterministic tests; it deliberately bypasses network discovery and should not be used for production data.
 
 ## Storage tables
 

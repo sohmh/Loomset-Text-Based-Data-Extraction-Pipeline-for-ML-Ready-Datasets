@@ -30,3 +30,44 @@ def test_fetch_urls_filters_pdf_and_social_urls(monkeypatch):
 
     monkeypatch.setattr("loomset.discovery.ddg_search.DDGS", FakeDDGS)
     assert fetch_urls("solar-punk", max_results=5) == ["https://example.com/article"]
+
+
+def test_fetch_urls_keeps_results_when_a_search_backend_fails(monkeypatch):
+    class FakeDDGS:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def text(self, query, max_results=10, backend="auto"):
+            if backend == "bing":
+                raise RuntimeError("provider unavailable")
+            if backend == "brave":
+                return [{"href": "https://morth.nic.in/road-safety"}]
+            return []
+
+    monkeypatch.setattr("loomset.discovery.ddg_search.DDGS", FakeDDGS)
+    monkeypatch.setattr("loomset.discovery.ddg_search._fetch_wikipedia_urls", lambda query, limit: [])
+    assert fetch_urls("indian traffic laws", max_results=5) == ["https://morth.nic.in/road-safety"]
+
+
+def test_fetch_urls_uses_full_text_wikipedia_as_last_resort(monkeypatch):
+    class EmptyDDGS:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def text(self, query, max_results=10, backend="auto"):
+            return []
+
+    monkeypatch.setattr("loomset.discovery.ddg_search.DDGS", EmptyDDGS)
+    monkeypatch.setattr(
+        "loomset.discovery.ddg_search._fetch_wikipedia_urls",
+        lambda query, limit: ["https://en.wikipedia.org/wiki/Traffic_in_India"],
+    )
+    assert fetch_urls("indian traffic laws", max_results=5) == [
+        "https://en.wikipedia.org/wiki/Traffic_in_India"
+    ]

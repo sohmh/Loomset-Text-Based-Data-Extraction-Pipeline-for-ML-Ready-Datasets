@@ -334,6 +334,7 @@
   .node-info .ni-row{display:flex; justify-content:space-between; padding:3px 0; gap:10px;}
   .node-info .ni-row span:first-child{color:var(--ink-faint);}
   .node-info .ni-row span:last-child{color:var(--ink); text-align:right; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:140px;}
+  .node-info .ni-text{margin-top:8px; padding-top:8px; border-top:1px solid var(--line); max-height:150px; overflow:auto; white-space:pre-wrap; overflow-wrap:anywhere; line-height:1.5; color:var(--ink-soft);}
 
   .extract-summary{margin-top:18px; font-family:var(--mono); font-size:12px; color:var(--ink-soft);}
   .extract-summary strong{color:var(--ink);}
@@ -362,6 +363,8 @@
   .taxo-head .taxo-count{font-family:var(--mono); color:var(--ink-soft); font-size:11px;}
   .taxo-track{height:8px; background:var(--line); border-radius:4px; overflow:hidden;}
   .taxo-fill{height:100%; width:0%; background:var(--moss); transition:width .2s ease-out;}
+  .label-progress{display:flex; align-items:center; gap:12px; margin:0 0 22px; font-family:var(--mono); font-size:11px; color:var(--ink-soft);}
+  .label-progress progress{width:150px; height:8px; accent-color:var(--moss);}
 
   /* dataset stage */
   .yield-grid{display:grid; grid-template-columns:repeat(3,1fr); gap:1px; background:var(--line); border:1px solid var(--line); border-radius:3px; overflow:hidden; margin-bottom:26px;}
@@ -381,8 +384,13 @@
   .format-chip{
     border:1px solid var(--line-strong); border-radius:3px; padding:9px 16px;
     font-family:var(--mono); font-size:11.5px; letter-spacing:.04em; color:var(--ink-soft);
+    background:var(--panel-2); cursor:pointer;
   }
   .format-chip.active{border-color:var(--moss); background:var(--moss-soft); color:var(--ink);}
+  .format-chip:hover{border-color:var(--ink); color:var(--ink);}
+  .rec-domain{min-width:0;}
+  .rec-link{display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--ink); text-decoration:underline; text-decoration-color:var(--line-strong); text-underline-offset:2px;}
+  .rec-link:hover{color:var(--amber);}
 
   .demo-note{font-size:12px; color:var(--ink-faint); margin-top:20px; max-width:52ch; line-height:1.6;}
 
@@ -506,7 +514,7 @@
 
         <div class="field-group">
           <label class="field-label" for="seedUrls">Seed URLs <span style="text-transform:none; letter-spacing:0;">(optional)</span></label>
-          <textarea id="seedUrls" placeholder="One per line — the crawler expands outward from these."></textarea>
+          <textarea id="seedUrls" placeholder="One URL per line — each URL is fetched and processed as a source."></textarea>
         </div>
 
         <div class="field-group" style="margin-bottom:8px;">
@@ -529,7 +537,7 @@
       <section class="stage wide" data-stage="3">
         <p class="eyebrow">Stage 03 — Start extraction</p>
         <h1>Send the crawler out.</h1>
-        <p class="lede">It walks outward from the seed sources, one link at a time, building a map of everything it touches.</p>
+        <p class="lede">LoomSet searches, fetches, extracts, cleans, and labels real pages. Only successfully processed text is included in the final dataset.</p>
 
         <div class="tree-wrap" id="treeWrap">
           <div class="params-box">
@@ -548,11 +556,12 @@
             <div class="ni-row"><span>Found at</span><span id="niTime">—</span></div>
             <div class="ni-row"><span>Size</span><span id="niSize">—</span></div>
             <div class="ni-row"><span>Status</span><span id="niStatus">—</span></div>
+            <div class="ni-text" id="niText">Select a record to preview its extracted text.</div>
           </div>
 
           <div class="tree-start-overlay" id="treeOverlay">
             <button class="btn-primary" id="startExtraction">Start extraction ▶</button>
-            <p>Builds a live map of every page it finds. Click any node once it appears to see what was pulled from it.</p>
+            <p>Runs the real LoomSet pipeline. Pages that fail fetching or text extraction are excluded from the dataset.</p>
           </div>
         </div>
 
@@ -591,11 +600,11 @@
         <div class="stat-strip">
           <div class="stat-box"><div class="sb-label">Kept</div><div class="sb-val moss" id="statKept">0</div></div>
           <div class="stat-box"><div class="sb-label">Removed</div><div class="sb-val rust" id="statRemoved">0</div></div>
-          <div class="stat-box"><div class="sb-label">Bytes saved</div><div class="sb-val" id="statBytes">0 KB</div></div>
+          <div class="stat-box"><div class="sb-label">Text size</div><div class="sb-val" id="statBytes">0 KB</div></div>
         </div>
 
         <div class="actions">
-          <button class="btn-primary" id="startCleaning">Run cleaning ▶</button>
+          <button class="btn-primary" id="startCleaning" style="display:none;">Run cleaning ▶</button>
           <button class="btn-primary" id="toLabel" style="display:none;">Proceed to labelling →</button>
         </div>
       </section>
@@ -604,12 +613,17 @@
       <section class="stage" data-stage="5">
         <p class="eyebrow">Stage 05 — Assay</p>
         <h1>Sort by what it's made of.</h1>
-        <p class="lede">Every cleaned record gets tagged against a taxonomy built from the seam name, with a confidence score attached.</p>
+        <p class="lede">Each extracted text record is classified as relevant or irrelevant to the seam. Review the source and text before using labels for training.</p>
+
+        <div class="label-progress" aria-live="polite">
+          <progress id="labelProgressBar" max="1" value="0"></progress>
+          <span id="labelProgressText">Waiting for the pipeline.</span>
+        </div>
 
         <div id="taxoList"></div>
 
         <div class="actions">
-          <button class="btn-primary" id="startLabeling">Run labelling ▶</button>
+          <button class="btn-primary" id="startLabeling" style="display:none;">Run labelling ▶</button>
           <button class="btn-primary" id="toDataset" style="display:none;">Proceed to dataset →</button>
         </div>
       </section>
@@ -636,17 +650,17 @@
 
         <label class="field-label">Format</label>
         <div class="format-chips">
-          <div class="format-chip active">JSONL</div>
-          <div class="format-chip">CSV</div>
-          <div class="format-chip">Parquet</div>
+          <button class="format-chip active" type="button" data-format="jsonl" aria-pressed="true">JSONL</button>
+          <button class="format-chip" type="button" data-format="csv" aria-pressed="false">CSV</button>
+          <button class="format-chip" type="button" data-format="parquet" aria-pressed="false">Parquet</button>
         </div>
 
         <div class="actions">
-          <button class="btn-primary" id="downloadBtn">Download dataset (.jsonl) ⬇</button>
+          <button class="btn-primary" id="downloadBtn" disabled>Download dataset (.jsonl) ⬇</button>
           <button class="btn-ghost" id="resetBtn">Start a new seam ↺</button>
         </div>
 
-        <p class="demo-note">Demo pipeline — records, labels, and confidence scores above are generated for preview purposes, not pulled from a live crawl.</p>
+        <p class="demo-note" id="datasetNote">Downloads contain extracted and cleaned page text with its label and source metadata. Confirm legal accuracy and licensing before training.</p>
       </section>
 
     </main>
@@ -708,32 +722,19 @@
   var runStatusEl = $("#runStatus");
   var runStatusText = $("#runStatusText");
 
-  /* ---------------- fake data pools ---------------- */
-  var DOMAIN_PREFIXES = ["forum.","boards.","archive.","wiki.","notes.","zine.","openrepo.","preprints.","journal.","gazette.","records.","thread.","community.","bulletin.","data."];
-  var TLDS = [".net",".org",".io",".edu",".info",".dev",".co"];
-  var PATHS = ["/t/1029","/archive/0234","/thread-88","/entry/017","/records/44","/posts/312","/item/905","/pages/12","/read/771","/vol-3/report"];
-
   function slugify(str){
     return (str||"source").toLowerCase().trim().split(/\s+/).slice(0,2).join("-").replace(/[^a-z0-9\-]/g,"") || "source";
   }
 
-  function fakeUrl(){
-    var prefix = DOMAIN_PREFIXES[Math.floor(Math.random()*DOMAIN_PREFIXES.length)];
-    var slug = slugify(state.niche);
-    var tld = TLDS[Math.floor(Math.random()*TLDS.length)];
-    var path = PATHS[Math.floor(Math.random()*PATHS.length)];
-    return prefix + slug + tld + path;
+  function validHttpUrl(value){
+    try {
+      var parsed = new URL(value.trim());
+      return (parsed.protocol === "https:" || parsed.protocol === "http:") && !!parsed.hostname;
+    } catch (_) { return false; }
   }
 
   function taxonomy(){
-    var n = state.niche || "the seam";
-    return [
-      n + " — how-to",
-      n + " — discussion",
-      n + " — reference",
-      n + " — troubleshooting",
-      n + " — anecdote"
-    ];
+    return ["relevant", "irrelevant"];
   }
 
   /* ---------------- stepper / stage nav ---------------- */
@@ -855,9 +856,11 @@
       var dotClass = r.status;
       var label = r.status.toUpperCase();
       if(r.status === "labeled" && r.label){ label = r.label.split(" — ")[1] || "LABELED"; label = label.toUpperCase(); }
+      var safeUrl = validHttpUrl(r.url) ? new URL(r.url).href : "";
+      var link = safeUrl ? '<a class="rec-link" href="'+safeUrl.replace(/&/g,'&amp;').replace(/\"/g,'&quot;').replace(/</g,'&lt;')+'" target="_blank" rel="noopener noreferrer" title="Open '+safeUrl.replace(/&/g,'&amp;').replace(/\"/g,'&quot;')+'">'+safeUrl.replace(/&/g,'&amp;').replace(/</g,'&lt;')+'</a>' : '<span class="rec-domain">Invalid URL</span>';
       return '<div class="record-row">'+
         '<span class="rec-dot '+dotClass+'"></span>'+
-        '<span class="rec-domain">'+r.url+'</span>'+
+        '<span class="rec-domain">'+link+'</span>'+
         '<span class="rec-status '+r.status+'">'+label+'</span>'+
       '</div>';
     }).join("");
@@ -1003,52 +1006,205 @@
     $("#niTime").textContent = new Date(record.foundAt).toLocaleTimeString();
     $("#niSize").textContent = record.sizeKB + " KB";
     $("#niStatus").textContent = record.status.toUpperCase();
+    $("#niText").textContent = record.text || "No extracted text is available for this record.";
     nodeInfo.classList.add("visible");
   }
 
-  var RECORD_TYPES = ["HTML page","Forum thread","PDF document","Wiki article","Blog post","Data table"];
-
-  function addRecord(){
-    var id = state.nextId++;
-    var record = {
-      id: id,
-      url: fakeUrl(),
-      type: RECORD_TYPES[Math.floor(Math.random()*RECORD_TYPES.length)],
-      status: "found",
-      foundAt: Date.now(),
-      sizeKB: 8 + Math.floor(Math.random()*180),
-      label: null,
-      confidence: null
-    };
-    state.records.push(record);
-    state.stats.found++;
-    addTreeNode(record);
-    renderLedger();
+  function handlePipelineEvent(event, metrics){
+    if(event.stage === "error") throw new Error(event.message || "The pipeline failed.");
+    var stages = {discovery:3, scraping:3, extraction:3, cleaning:4, labeling:5, review:5, export:6};
+    var targetStage = stages[event.stage];
+    if(targetStage){
+      unlock(targetStage);
+      state.stage = targetStage;
+      render();
+    }
+    if(event.stage === "discovery" && event.status === "complete"){
+      metrics.discovered = event.seen || event.count || 0;
+      state.stats.found = metrics.discovered;
+    }
+    if(event.stage === "cleaning" && event.status === "complete"){
+      metrics.cleaned = event.count || 0;
+      metrics.removed = event.removed || 0;
+      state.stats.cleaned = metrics.cleaned;
+      state.stats.removed = metrics.removed;
+      statKept.textContent = metrics.cleaned;
+      statRemoved.textContent = metrics.removed;
+      statBytes.textContent = "—";
+      startCleaningBtn.style.display = "none";
+      toLabelBtn.style.display = "inline-block";
+      $$(".op-row").forEach(function(row){
+        $(".op-fill", row).style.width = "100%";
+        $(".op-fill", row).classList.add("done");
+        $(".op-pct", row).textContent = "100%";
+      });
+    }
+    if(event.stage === "labeling" && event.status === "complete"){
+      state.stats.labeled = event.count || 0;
+      var completedBar = $("#labelProgressBar");
+      completedBar.max = Math.max(event.count || 0, 1);
+      completedBar.value = event.count || 0;
+      $("#labelProgressText").textContent = "Labeled " + (event.count || 0) + " of " + (event.count || 0) + " records.";
+      startLabelingBtn.style.display = "none";
+      toDatasetBtn.style.display = "inline-block";
+    }
+    if(event.stage === "labeling" && event.status === "running"){
+      metrics.labelCounts = {};
+      metrics.labelTotal = event.count || 0;
+      state.stats.labeled = 0;
+      initTaxoList();
+      var progressBar = $("#labelProgressBar");
+      progressBar.max = Math.max(metrics.labelTotal, 1);
+      progressBar.value = 0;
+      $("#labelProgressText").textContent = "Labeling 0 of " + metrics.labelTotal + " records…";
+    }
+    if(event.stage === "labeling" && event.status === "progress"){
+      state.stats.labeled = event.current || 0;
+      var progress = $("#labelProgressBar");
+      progress.max = Math.max(event.total || metrics.labelTotal || 1, 1);
+      progress.value = event.current || 0;
+      $("#labelProgressText").textContent = "Labeling " + (event.current || 0) + " of " + (event.total || metrics.labelTotal || 0) + " records · " + (event.label || "");
+      if(event.label){
+        metrics.labelCounts[event.label] = (metrics.labelCounts[event.label] || 0) + 1;
+        var labelRow = $$('.taxo-row').find(function(item){return item.dataset.label === event.label;});
+        if(labelRow){
+          var labelCount = metrics.labelCounts[event.label];
+          $(".taxo-count", labelRow).textContent = labelCount;
+          $(".taxo-fill", labelRow).style.width = metrics.labelTotal ? Math.round(labelCount / metrics.labelTotal * 100) + "%" : "0%";
+        }
+      }
+      var preview = event.record_preview;
+      if(preview && preview.url && !state.records.some(function(record){return record.source_id === preview.id;})){
+        var record = {
+          id:state.records.length + 1, source_id:preview.id, url:preview.url,
+          domain:preview.domain || "", title:"", text:preview.text || "",
+          query:preview.query || state.niche, language:"", fetched_at:"",
+          label:preview.label || event.label || "", confidence:Number(preview.confidence || 0),
+          label_source:preview.label_source || "auto", status:"labeled",
+          type:"Extracted page", foundAt:Date.now(),
+          sizeKB:Math.round(new Blob([preview.text || ""]).size / 1024)
+        };
+        state.records.push(record);
+        addTreeNode(record);
+        markNodeStatus(record.id, record.status);
+        renderLedger();
+      }
+    }
     updateReadout();
-    extractSummary.innerHTML = "<strong>" + state.stats.found + "</strong> of " + state.targetCount + " records found.";
-    return record;
+    if(event.message) extractSummary.textContent = event.message;
   }
 
-  startExtractionBtn.addEventListener("click", function(){
+  async function readPipelineStream(response){
+    if(!response.body || !response.body.getReader) throw new Error("Streaming is unavailable in this browser.");
+    var reader = response.body.getReader();
+    var decoder = new TextDecoder();
+    var buffer = "";
+    var result = null;
+    var metrics = {discovered:0, cleaned:0, removed:0, labelCounts:{}, labelTotal:0};
+    function consume(frame){
+      var data = frame.split(/\r?\n/).filter(function(line){return line.indexOf("data:") === 0;}).map(function(line){return line.slice(5).trim();}).join("\n");
+      if(!data) return;
+      var event = JSON.parse(data);
+      handlePipelineEvent(event, metrics);
+      if(event.stage === "result") result = {event:event, metrics:metrics};
+    }
+    while(true){
+      var chunk = await reader.read();
+      buffer += decoder.decode(chunk.value || new Uint8Array(), {stream:!chunk.done});
+      var frames = buffer.split(/\r?\n\r?\n/);
+      buffer = frames.pop();
+      frames.forEach(consume);
+      if(chunk.done) break;
+    }
+    if(buffer.trim()) consume(buffer);
+    if(!result) throw new Error("The pipeline stream ended before exporting a dataset.");
+    return result;
+  }
+
+  function applyPipelineResult(payload){
+    var records = (payload.event.records || []).filter(function(record){return typeof record.text === "string" && record.text.trim().length > 0;});
+    state.records = records.map(function(record, index){
+      var confidence = Number(record.confidence || 0);
+      return {
+        id:index + 1, source_id:record.id, url:record.url, domain:record.domain || "",
+        title:record.title || "", text:record.text, query:record.query || state.niche,
+        language:record.language || "", fetched_at:record.fetched_at || "",
+        label:record.label || "", confidence:confidence, label_source:record.label_source || "auto",
+        status:"labeled", type:"Extracted page", foundAt:record.fetched_at ? Date.parse(record.fetched_at) : Date.now(),
+        sizeKB:Math.round(new Blob([record.text]).size / 1024)
+      };
+    });
+    state.nextId = state.records.length + 1;
+    state.stats.found = payload.metrics.discovered || payload.event.count || state.records.length;
+    state.stats.cleaned = payload.metrics.cleaned || state.records.length;
+    state.stats.labeled = state.records.length;
+    state.stats.removed = payload.metrics.removed || Math.max(0, state.stats.found - state.stats.cleaned);
+    treeNodes = [];
+    treeSvg.innerHTML = "";
+    state.records.forEach(function(record){
+      addTreeNode(record);
+      markNodeStatus(record.id, record.status);
+    });
+    var textBytes = state.records.reduce(function(total, record){return total + new Blob([record.text]).size;}, 0);
+    statBytes.textContent = (textBytes / 1024).toFixed(1) + " KB";
+    renderLedger();
+    initTaxoList();
+    taxonomy().forEach(function(label){
+      var count = state.records.filter(function(record){return record.label === label;}).length;
+      var row = $$('.taxo-row').find(function(item){return item.dataset.label === label;});
+      if(row){
+        $(".taxo-count", row).textContent = count;
+        $(".taxo-fill", row).style.width = state.records.length ? Math.round(count / state.records.length * 100) + "%" : "0%";
+      }
+    });
+    state.running = false;
+    stopElapsedTimer();
+    state.maxUnlocked = 6;
+    state.stage = 6;
+    render();
+    buildDatasetSummary();
+    toCleanBtn.disabled = false;
+    startCleaningBtn.disabled = true;
+    startCleaningBtn.style.display = "none";
+    toLabelBtn.style.display = "inline-block";
+    startLabelingBtn.disabled = true;
+    startLabelingBtn.style.display = "none";
+    toDatasetBtn.style.display = "inline-block";
+    downloadBtn.disabled = state.records.length === 0;
+    var note = $("#datasetNote");
+    if(!state.records.length) note.textContent = "No nonempty text passed fetching, extraction, and cleaning. There is no training dataset to download.";
+    extractSummary.textContent = state.records.length + " extracted text records exported from the real pipeline.";
+    treeOverlay.classList.add("hidden");
+    updateReadout();
+  }
+
+  startExtractionBtn.addEventListener("click", async function(){
     if(state.running) return;
     state.running = true;
     startElapsedTimer();
     updateReadout();
     treeOverlay.classList.add("hidden");
-
-    state.timers.extract = setInterval(function(){
-      if(state.stats.found >= state.targetCount){
-        clearInterval(state.timers.extract);
-        state.running = false;
-        stopElapsedTimer();
-        updateReadout();
-        extractSummary.innerHTML = "Extraction complete — <strong>" + state.stats.found + "</strong> records found.";
-        toCleanBtn.disabled = false;
-        unlock(4);
-        return;
-      }
-      addRecord();
-    }, 150 + Math.random()*250);
+    startExtractionBtn.disabled = true;
+    startExtractionBtn.textContent = "Running pipeline…";
+    state.records = [];
+    state.stats.found = 0; state.stats.cleaned = 0; state.stats.labeled = 0; state.stats.removed = 0;
+    treeNodes = []; treeSvg.innerHTML = ""; renderLedger();
+    var seedUrls = state.seedUrls.split(/\r?\n/).map(function(url){return url.trim();}).filter(Boolean);
+    try {
+      var response = await fetch("/api/run/stream", {
+        method:"POST", headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({query:state.niche, max_results:state.targetCount, seed_urls:seedUrls})
+      });
+      if(!response.ok) throw new Error("Could not start the LoomSet pipeline. Check the server and seed URLs.");
+      applyPipelineResult(await readPipelineStream(response));
+    } catch(error){
+      state.running = false; stopElapsedTimer(); updateReadout();
+      state.stage = 3; state.maxUnlocked = Math.max(state.maxUnlocked, 3); render();
+      extractSummary.textContent = error.message || "Pipeline failed. Check the server logs and try again.";
+      treeOverlay.classList.remove("hidden");
+      startExtractionBtn.disabled = false;
+      startExtractionBtn.textContent = "Retry extraction ▶";
+    }
   });
 
   toCleanBtn.addEventListener("click", function(){ goToStage(4); });
@@ -1058,79 +1214,6 @@
   var toLabelBtn = $("#toLabel");
   var statKept = $("#statKept"), statRemoved = $("#statRemoved"), statBytes = $("#statBytes");
 
-  var CLEAN_OPS = [
-    { key:"dedupe", name:"Deduplicate", dur:1400 },
-    { key:"strip", name:"Strip HTML & scripts", dur:1100 },
-    { key:"normalize", name:"Normalize whitespace", dur:900 },
-    { key:"lang", name:"Filter language", dur:1000 }
-  ];
-
-  function runCleaning(){
-    startCleaningBtn.disabled = true;
-    state.running = true;
-    startElapsedTimer();
-    updateReadout();
-
-    var i = 0;
-    function nextOp(){
-      if(i >= CLEAN_OPS.length){
-        state.running = false;
-        stopElapsedTimer();
-        state.records.forEach(function(r){
-          if(r.status !== "removed"){ r.status = "cleaned"; state.stats.cleaned++; markNodeStatus(r.id, "cleaned"); }
-        });
-        renderLedger();
-        updateReadout();
-        toLabelBtn.style.display = "inline-block";
-        startCleaningBtn.style.display = "none";
-        unlock(5);
-        return;
-      }
-      var op = CLEAN_OPS[i];
-      var row = $('.op-row[data-op="'+op.key+'"]', document);
-      var fill = $(".op-fill", row);
-      var pct = $(".op-pct", row);
-      var startT = Date.now();
-
-      var iv = setInterval(function(){
-        var elapsed = Date.now() - startT;
-        var p = Math.min(100, Math.round((elapsed/op.dur)*100));
-        fill.style.width = p + "%";
-        pct.textContent = p + "%";
-        if(p >= 100){
-          clearInterval(iv);
-          fill.classList.add("done");
-
-          if(op.key === "dedupe"){
-            var toRemove = Math.max(1, Math.round(state.records.length * 0.09));
-            var candidates = state.records.filter(function(r){ return r.status === "found"; });
-            for(var k=0; k<toRemove && candidates.length>0; k++){
-              var idx = Math.floor(Math.random()*candidates.length);
-              var rec = candidates.splice(idx,1)[0];
-              rec.status = "removed";
-              state.stats.removed++;
-              markNodeStatus(rec.id, "removed");
-            }
-          }
-          if(op.key === "strip"){
-            state.stats.bytesSaved += Math.round(state.records.length * (4 + Math.random()*6));
-          }
-
-          statKept.textContent = state.records.filter(function(r){return r.status!=="removed";}).length;
-          statRemoved.textContent = state.stats.removed;
-          statBytes.textContent = state.stats.bytesSaved + " KB";
-          renderLedger();
-          updateReadout();
-
-          i++;
-          nextOp();
-        }
-      }, 40);
-    }
-    nextOp();
-  }
-
-  startCleaningBtn.addEventListener("click", runCleaning);
   toLabelBtn.addEventListener("click", function(){ goToStage(5); });
 
   /* ---------------- stage 5: label ---------------- */
@@ -1149,53 +1232,6 @@
     }).join("");
   }
 
-  function runLabeling(){
-    startLabelingBtn.disabled = true;
-    state.running = true;
-    startElapsedTimer();
-    updateReadout();
-
-    var labels = taxonomy();
-    var toLabel = state.records.filter(function(r){ return r.status === "cleaned"; });
-    var total = toLabel.length;
-    var counts = {};
-    labels.forEach(function(l){ counts[l] = 0; });
-    var idx = 0;
-
-    state.timers.label = setInterval(function(){
-      if(idx >= toLabel.length){
-        clearInterval(state.timers.label);
-        state.running = false;
-        stopElapsedTimer();
-        updateReadout();
-        toDatasetBtn.style.display = "inline-block";
-        startLabelingBtn.style.display = "none";
-        unlock(6);
-        return;
-      }
-      var rec = toLabel[idx];
-      var label = labels[Math.floor(Math.random()*labels.length)];
-      var confidence = 70 + Math.floor(Math.random()*29);
-      rec.label = label;
-      rec.confidence = confidence;
-      rec.status = "labeled";
-      state.stats.labeled++;
-      counts[label]++;
-      markNodeStatus(rec.id, "labeled");
-
-      var row = document.querySelector('.taxo-row[data-label="'+label.replace(/"/g,'&quot;')+'"]');
-      if(row){
-        $(".taxo-count", row).textContent = counts[label];
-        $(".taxo-fill", row).style.width = Math.round((counts[label]/total)*100) + "%";
-      }
-
-      renderLedger();
-      updateReadout();
-      idx++;
-    }, 120);
-  }
-
-  startLabelingBtn.addEventListener("click", runLabeling);
   toDatasetBtn.addEventListener("click", function(){ goToStage(6); buildDatasetSummary(); });
 
   /* ---------------- stage 6: dataset ---------------- */
@@ -1210,27 +1246,66 @@
     var confSum = 0;
     labeled.forEach(function(r){ uniqueLabels[r.label] = true; confSum += r.confidence; });
     yLabels.textContent = Object.keys(uniqueLabels).length;
-    yConf.textContent = labeled.length ? Math.round(confSum/labeled.length) + "%" : "0%";
+    var averageConfidence = labeled.length ? confSum/labeled.length : 0;
+    yConf.textContent = labeled.length ? Math.round(averageConfidence <= 1 ? averageConfidence * 100 : averageConfidence) + "%" : "0%";
   }
 
-  downloadBtn.addEventListener("click", function(){
-    var labeled = state.records.filter(function(r){ return r.status === "labeled"; });
-    var lines = labeled.map(function(r){
-      return JSON.stringify({
-        id: r.id, url: r.url, type: r.type, seam: state.niche,
-        label: r.label, confidence: r.confidence, size_kb: r.sizeKB
+  var selectedFormat = "jsonl";
+  var formatButtons = $$(".format-chip");
+  formatButtons.forEach(function(button){
+    button.addEventListener("click", function(){
+      selectedFormat = button.dataset.format;
+      formatButtons.forEach(function(item){
+        var active = item === button;
+        item.classList.toggle("active", active);
+        item.setAttribute("aria-pressed", String(active));
       });
+      downloadBtn.textContent = "Download dataset (." + selectedFormat + ") ⬇";
     });
-    var blob = new Blob([lines.join("\n")], { type: "application/jsonl" });
+  });
+
+  downloadBtn.addEventListener("click", async function(){
+    var labeled = state.records.filter(function(r){ return r.status === "labeled"; });
+    var rows = labeled.map(function(r){
+      return {
+        id: r.source_id, text: r.text, label: r.label, confidence: r.confidence,
+        url: r.url, domain: r.domain, title: r.title, language: r.language,
+        fetched_at: r.fetched_at, label_source: r.label_source, query: r.query
+      };
+    });
+    var extension = selectedFormat;
+    var mime = "application/jsonl";
+    var content;
+    if(selectedFormat === "csv"){
+      var fields = ["id","text","label","confidence","url","domain","title","language","fetched_at","label_source","query"];
+      var csvCell = function(value){return '"' + String(value == null ? "" : value).replace(/"/g,'""') + '"';};
+      content = [fields.map(csvCell).join(",")].concat(rows.map(function(row){return fields.map(function(field){return csvCell(row[field]);}).join(",");})).join("\r\n");
+      mime = "text/csv;charset=utf-8";
+    } else if(selectedFormat === "parquet"){
+      try {
+        var response = await fetch("/api/export/parquet", {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({records:rows})});
+        if(!response.ok) throw new Error("Parquet export needs the LoomSet server. Start it and retry.");
+        var parquetBlob = await response.blob();
+        saveBlob(parquetBlob, (slugify(state.niche) || "loomset") + "-dataset.parquet");
+        return;
+      } catch(error){ alert(error.message); return; }
+    } else {
+      content = rows.map(function(row){return JSON.stringify(row);}).join("\n");
+    }
+    var blob = new Blob([content], { type: mime });
+    saveBlob(blob, (slugify(state.niche) || "loomset") + "-dataset." + extension);
+  });
+
+  function saveBlob(blob, filename){
     var url = URL.createObjectURL(blob);
     var a = document.createElement("a");
     a.href = url;
-    a.download = (slugify(state.niche) || "loomset") + "-dataset.jsonl";
+    a.download = filename;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-  });
+    setTimeout(function(){URL.revokeObjectURL(url);}, 1000);
+  }
 
   resetBtn.addEventListener("click", function(){
     if(state.timers.extract) clearInterval(state.timers.extract);
@@ -1243,6 +1318,17 @@
       stats:{found:0,cleaned:0,labeled:0,removed:0,bytesSaved:0,startTime:null},
       timers:{}, running:false, runId: genRunId()
     };
+    selectedFormat = "jsonl";
+    formatButtons.forEach(function(button){
+      var active = button.dataset.format === selectedFormat;
+      button.classList.toggle("active", active);
+      button.setAttribute("aria-pressed", String(active));
+    });
+    downloadBtn.textContent = "Download dataset (.jsonl) ⬇";
+    downloadBtn.disabled = true;
+    $("#datasetNote").textContent = "Downloads contain extracted and cleaned page text with its label and source metadata. Confirm legal accuracy and licensing before training.";
+    startExtractionBtn.disabled = false;
+    startExtractionBtn.textContent = "Start extraction ▶";
     treeNodes = [];
     treeSvg.innerHTML = "";
     treeOverlay.classList.remove("hidden");
@@ -1258,10 +1344,10 @@
     toCleanBtn.disabled = true;
     $$(".op-fill").forEach(function(f){ f.style.width="0%"; f.classList.remove("done"); });
     $$(".op-pct").forEach(function(p){ p.textContent="0%"; });
-    startCleaningBtn.disabled = false; startCleaningBtn.style.display="inline-block";
+    startCleaningBtn.disabled = true; startCleaningBtn.style.display="none";
     toLabelBtn.style.display = "none";
     statKept.textContent="0"; statRemoved.textContent="0"; statBytes.textContent="0 KB";
-    startLabelingBtn.disabled = false; startLabelingBtn.style.display="inline-block";
+    startLabelingBtn.disabled = true; startLabelingBtn.style.display="none";
     toDatasetBtn.style.display = "none";
     initTaxoList();
     buildBarcode();
