@@ -116,6 +116,7 @@ def stage_discovery(
         record = {**doc, "fetched_at": None, "status": "discovered"}
         if upsert_document(db_path, record):
             new_documents.append(record)
+            _emit(callback, "discovery", "progress", url=record["url"], parent_url=record.get("parent_url"), current=len(new_documents), total=len(discovered), record=record)
     _emit(
         callback,
         "discovery",

@@ -93,13 +93,13 @@ def _ddgs_results(query: str, limit: int, backend: str | None = None) -> list[st
         return []
 
 
-def _expand_topical_links(seed_urls: list[str], query: str, needed: int) -> list[str]:
+def _expand_topical_links_with_parent(seed_urls: list[str], query: str, needed: int) -> list[tuple[str, str]]:
     """Extract same-domain topical internal links from top seed pages."""
     if needed <= 0 or not seed_urls:
         return []
 
     tokens = [t.lower() for t in re.findall(r"[a-z0-9]+", query) if len(t) > 2]
-    expanded: list[str] = []
+    expanded: list[tuple[str, str]] = []
 
     for seed in seed_urls[:3]:
         if len(expanded) >= needed:
@@ -131,7 +131,7 @@ def _expand_topical_links(seed_urls: list[str], query: str, needed: int) -> list
                 # Check if URL path contains topical keywords
                 path_lower = parsed_href.path.lower()
                 if any(tok in path_lower for tok in tokens):
-                    expanded.append(full_url)
+                    expanded.append((full_url, seed))
                     if len(expanded) >= needed:
                         break
         except Exception:
@@ -140,7 +140,12 @@ def _expand_topical_links(seed_urls: list[str], query: str, needed: int) -> list
     return expanded
 
 
-def fetch_urls(query: str, max_results: int = 10) -> list[str]:
+def _expand_topical_links(seed_urls: list[str], query: str, needed: int) -> list[str]:
+    """Compatibility wrapper returning just expanded URLs."""
+    return [url for url, _parent in _expand_topical_links_with_parent(seed_urls, query, needed)]
+
+
+def fetch_discoveries(query: str, max_results: int = 10) -> list[dict[str, str | None]]:
     if not query.strip() or max_results <= 0:
         return []
 
@@ -149,23 +154,29 @@ def fetch_urls(query: str, max_results: int = 10) -> list[str]:
         results.extend(_ddgs_results(query, max_results, backend))
         unique = dedupe_urls(results)
         if len(unique) >= max_results:
-            return unique[:max_results]
+            return [{"url": url, "parent_url": None} for url in unique[:max_results]]
 
     # Wikipedia search
     if len(dedupe_urls(results)) < max_results:
         results.extend(_fetch_wikipedia_urls(query, limit=max_results))
 
     # 1-hop in-domain link expansion if we still need more URLs
+    additional: list[tuple[str, str]] = []
     deduped = dedupe_urls(results)
     if len(deduped) < max_results and deduped:
         needed = max_results - len(deduped)
-        additional = _expand_topical_links(deduped, query, needed=needed)
-        results.extend(additional)
+        additional = _expand_topical_links_with_parent(deduped, query, needed=needed)
+        results.extend(url for url, _parent in additional)
         deduped = dedupe_urls(results)
 
     if not deduped:
         logger.warning("No URLs discovered for %r", query)
-    return deduped[:max_results]
+    parent_by_url = {normalize_url(url): normalize_url(parent) for url, parent in additional}
+    return [{"url": url, "parent_url": parent_by_url.get(normalize_url(url))} for url in deduped[:max_results]]
+
+
+def fetch_urls(query: str, max_results: int = 10) -> list[str]:
+    return [item["url"] for item in fetch_discoveries(query, max_results)]
 
 
 def normalize_url(url: str) -> str:
@@ -201,12 +212,14 @@ def dedupe_urls(urls: Iterable[str]) -> list[str]:
 
 
 def discover_documents(query: str, max_results: int = 10, db_path: str | None = None) -> list[dict]:
-    urls = fetch_urls(query, max_results=max_results)
+    urls = fetch_discoveries(query, max_results=max_results)
     records = []
-    for url in urls:
+    for item in urls:
+        url = item["url"]
         records.append(
             {
                 "url": url,
+                "parent_url": item.get("parent_url"),
                 "query": query,
                 "domain": urlparse(url).netloc,
                 "status": "discovered",

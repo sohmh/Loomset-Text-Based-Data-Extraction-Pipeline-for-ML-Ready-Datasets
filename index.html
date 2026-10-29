@@ -169,6 +169,7 @@
   .record-row:last-child{border-bottom:none;}
   .rec-dot{width:6px; height:6px; border-radius:50%; flex:none; background:var(--ink-faint);}
   .rec-dot.found{background:var(--amber);}
+  .rec-dot.discovered{background:var(--amber);}
   .rec-dot.cleaned{background:var(--ink-soft);}
   .rec-dot.labeled{background:var(--moss);}
   .rec-dot.removed{background:var(--rust);}
@@ -180,6 +181,7 @@
     flex:none; color:var(--ink-faint); text-transform:uppercase; font-size:9px; letter-spacing:.05em;
   }
   .rec-status.found{color:var(--amber);}
+  .rec-status.discovered{color:var(--amber);}
   .rec-status.labeled{color:var(--moss);}
   .rec-status.removed{color:var(--rust); text-decoration:line-through;}
 
@@ -935,24 +937,15 @@
   function addTreeNode(record){
     var svgW = 900, svgH = 560;
     var node;
-    if(treeNodes.length === 0){
-      node = { id: record.id, x: 90, y: 525, angle: 20, depth: 0, parentId: null, children: 0 };
-    } else {
-      var candidates = treeNodes.filter(function(n){ return n.children < 3; });
-      if(candidates.length === 0) candidates = treeNodes;
-      var parent = candidates[Math.floor(Math.random()*candidates.length)];
-      var depth = parent.depth + 1;
-      var baseLen = 68 * Math.pow(0.9, Math.min(depth, 9));
-      var spread = 55;
-      var angle = parent.angle + (Math.random()*spread - spread/2);
-      angle = Math.max(-85, Math.min(85, angle));
-      var rad = angle * Math.PI/180;
-      var x = parent.x + Math.sin(rad)*baseLen;
-      var y = parent.y - Math.cos(rad)*baseLen;
-      x = Math.max(16, Math.min(svgW-16, x));
-      y = Math.max(16, Math.min(svgH-16, y));
+    var parent = record.parent_url && treeNodes.find(function(n){ return n.url === record.parent_url; });
+    var depth = parent ? parent.depth + 1 : 0;
+    var siblings = parent ? treeNodes.filter(function(n){ return n.parentId === parent.id; }).length : treeNodes.filter(function(n){ return n.depth === 0; }).length;
+    var x = parent ? parent.x + (siblings - 1) * 62 : 70 + (siblings % 10) * 82;
+    var y = parent ? parent.y + 76 : 70 + Math.floor(siblings / 10) * 86;
+    x = Math.max(18, Math.min(svgW - 18, x)); y = Math.max(18, Math.min(svgH - 18, y));
+    node = { id: record.id, url: record.url, x:x, y:y, depth:depth, parentId: parent ? parent.id : null, children:0 };
+    if(parent){
       parent.children++;
-      node = { id: record.id, x:x, y:y, angle:angle, depth:depth, parentId: parent.id, children:0 };
 
       var line = document.createElementNS(svgNS, "line");
       line.setAttribute("x1", parent.x); line.setAttribute("y1", parent.y);
@@ -971,7 +964,7 @@
     circle.setAttribute("stroke-width", "1.5");
     circle.style.cursor = "pointer";
     circle.dataset.recordId = record.id;
-    circle.addEventListener("click", function(){ showNodeInfo(record); });
+    circle.addEventListener("click", function(){ showNodeInfo(state.records.find(function(item){return item.id === record.id;}) || record); });
     treeSvg.appendChild(circle);
     node.el = circle;
 
@@ -1002,10 +995,10 @@
   }
 
   function showNodeInfo(record){
-    $("#niType").textContent = record.type;
+    $("#niType").textContent = record.type || "Discovered page";
     $("#niUrl").textContent = record.url;
-    $("#niTime").textContent = new Date(record.foundAt).toLocaleTimeString();
-    $("#niSize").textContent = record.sizeKB + " KB";
+    $("#niTime").textContent = record.foundAt ? new Date(record.foundAt).toLocaleTimeString() : "Just now";
+    $("#niSize").textContent = record.sizeKB ? record.sizeKB + " KB" : "—";
     $("#niStatus").textContent = record.status.toUpperCase();
     $("#niText").textContent = record.text || "No extracted text is available for this record.";
     nodeInfo.classList.add("visible");
@@ -1019,6 +1012,16 @@
       unlock(targetStage);
       state.stage = targetStage;
       render();
+    }
+    if(event.stage === "discovery" && event.status === "progress" && event.record){
+      var discovered = event.record;
+      var record = {id:state.records.length + 1, source_id:discovered.id, url:discovered.url, parent_url:discovered.parent_url || null,
+        domain:discovered.domain || "", title:"", text:"", query:discovered.query || state.niche, status:"discovered",
+        type:"Discovered page", foundAt:Date.now(), sizeKB:0};
+      state.records.push(record);
+      addTreeNode(record);
+      renderLedger();
+      state.stats.found = state.records.length;
     }
     if(event.stage === "discovery" && event.status === "complete"){
       metrics.discovered = event.seen || event.count || 0;
@@ -1075,7 +1078,7 @@
         }
       }
       var preview = event.record_preview;
-      if(preview && preview.url && !state.records.some(function(record){return record.source_id === preview.id;})){
+      if(preview && preview.url){
         var record = {
           id:state.records.length + 1, source_id:preview.id, url:preview.url,
           domain:preview.domain || "", title:"", text:preview.text || "",
@@ -1085,8 +1088,8 @@
           type:"Extracted page", foundAt:Date.now(),
           sizeKB:Math.round(new Blob([preview.text || ""]).size / 1024)
         };
-        state.records.push(record);
-        addTreeNode(record);
+        var prior = state.records.find(function(item){return item.source_id === preview.id;});
+        if(prior){ Object.assign(prior, record); record = prior; } else { state.records.push(record); addTreeNode(record); }
         markNodeStatus(record.id, record.status);
         renderLedger();
       }
@@ -1126,8 +1129,10 @@
     var records = (payload.event.records || []).filter(function(record){return typeof record.text === "string" && record.text.trim().length > 0;});
     state.records = records.map(function(record, index){
       var confidence = Number(record.confidence || 0);
+      var discoveredRecord = state.records.find(function(item){return item.url === record.url;});
       return {
         id:index + 1, source_id:record.id, url:record.url, domain:record.domain || "",
+        parent_url:discoveredRecord ? discoveredRecord.parent_url : null,
         title:record.title || "", text:record.text, query:record.query || state.niche,
         language:record.language || "", fetched_at:record.fetched_at || "",
         label:record.label || "", confidence:confidence, label_source:record.label_source || "auto",
