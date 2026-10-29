@@ -343,6 +343,7 @@ def stage_export(db_path: str | Path, export_dir: str | Path, query: str | None 
         )
     _emit(callback, "export", "running", count=len(exported_records), message=f"Exporting {len(exported_records)} records...")
     dataset_path, csv_path, parquet_path, card_path = export_dataset(exported_records, export_dir)
+    target_dir = Path(export_dir)
     _emit(callback, "export", "complete", count=len(exported_records), message=f"Exported {len(exported_records)} records to {export_dir}")
     return {
         "records": exported_records,
@@ -350,6 +351,9 @@ def stage_export(db_path: str | Path, export_dir: str | Path, query: str | None 
         "csv_path": csv_path,
         "parquet_path": parquet_path,
         "card_path": card_path,
+        "chunks_csv_path": target_dir / "dataset_chunks.csv",
+        "chunks_json_path": target_dir / "dataset_chunks.json",
+        "chunks_parquet_path": target_dir / "dataset_chunks.parquet",
     }
 
 
@@ -422,7 +426,7 @@ def run_pipeline(
     if base_export_dir.resolve() != Path(export_dir).resolve():
         base_export_dir.mkdir(parents=True, exist_ok=True)
         import shutil
-        for fkey in ("dataset_path", "csv_path", "parquet_path", "card_path"):
+        for fkey in ("dataset_path", "csv_path", "parquet_path", "card_path", "chunks_csv_path", "chunks_json_path", "chunks_parquet_path"):
             src_file = result.get(fkey)
             if src_file and Path(src_file).exists():
                 shutil.copy2(src_file, base_export_dir / Path(src_file).name)

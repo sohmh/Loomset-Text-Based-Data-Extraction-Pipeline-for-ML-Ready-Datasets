@@ -5,6 +5,7 @@ import io
 import json
 import queue
 import threading
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 
@@ -15,6 +16,12 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from loomset.labeling.ollama_client import check_ollama_status, _get_client
+from loomset.labeling.ollama_manager import (
+    get_available_models,
+    is_ollama_running,
+    start_ollama_server,
+    stop_ollama_server,
+)
 from loomset.discovery.ddg_search import fetch_urls
 from loomset.pipeline import run_pipeline, status_summary
 
@@ -23,7 +30,21 @@ INDEX_PATH = ROOT / "index.html"
 DATA_DIR = ROOT / "data"
 EXPORTS_DIR = DATA_DIR / "exports"
 
-app = FastAPI(title="LoomSet", version="0.1.0")
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """FastAPI lifespan context: non-blocking background auto-start of local LLM daemon."""
+    import os
+    if not os.environ.get("LOOMSET_DISABLE_OLLAMA_AUTOSTART"):
+        threading.Thread(target=start_ollama_server, kwargs={"timeout": 6.0}, daemon=True).start()
+    yield
+    try:
+        stop_ollama_server()
+    except Exception:
+        pass
+
+
+app = FastAPI(title="LoomSet", version="0.2.0", lifespan=lifespan)
 
 # CORS for local development
 app.add_middleware(
@@ -44,6 +65,9 @@ def _download_tokens(query_slug: str) -> dict[str, str]:
         "json": f"{query_slug}/dataset.json",
         "csv": f"{query_slug}/dataset.csv",
         "parquet": f"{query_slug}/dataset.parquet",
+        "chunks_json": f"{query_slug}/dataset_chunks.json",
+        "chunks_csv": f"{query_slug}/dataset_chunks.csv",
+        "chunks_parquet": f"{query_slug}/dataset_chunks.parquet",
     }
 
 
@@ -105,8 +129,21 @@ async def export_parquet(request: Request) -> Response:
 
 @app.get("/api/ollama/status")
 def ollama_status() -> dict[str, object]:
-    result = check_ollama_status()
+    result = check_ollama_status(auto_start=False)
     return {"ok": True, **result}
+
+
+@app.post("/api/ollama/start")
+def ollama_start() -> dict[str, object]:
+    success = start_ollama_server(timeout=10.0)
+    result = check_ollama_status(auto_start=False)
+    return {"ok": success, **result}
+
+
+@app.get("/api/ollama/models")
+def ollama_models() -> dict[str, object]:
+    models = get_available_models()
+    return {"ok": True, "models": models}
 
 
 @app.get("/api/status")
